@@ -1,3 +1,4 @@
+# ---------------- utils.py ----------------
 import torch
 import numpy as np
 import random
@@ -12,3 +13,8 @@ def set_seed(seed: int = 42):
 @torch.no_grad()
 def accuracy(logits, y):
     return (logits.argmax(dim=-1) == y).float().mean().item()
+
+@torch.no_grad()
+def mae(pred, y):
+    """Mean absolute error used for regression benchmarks."""
+    return (pred - y).abs().mean().item()
