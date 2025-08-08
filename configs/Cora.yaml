@@ -1,0 +1,11 @@
+out_dir: results
+dataset:
+
+train:
+  batch_size:
+model:
+  type: NSGNNModel
+  loss_fun: l1
+  edge_decoding: dot
+  graph_pooling: add
+optim:
