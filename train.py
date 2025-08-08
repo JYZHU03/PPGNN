@@ -1,9 +1,14 @@
-# ---------------- train.py ----------------
 from __future__ import annotations
 
 import argparse
-from typing import Dict, Iterable
+from pathlib import Path
+from typing import Dict, Iterable, Any
 
+try:  # Optional YAML dependency
+    import yaml  # type: ignore
+except Exception:  # pragma: no cover - fallback if PyYAML is absent
+    yaml = None
+import json
 import torch
 import torch.nn.functional as F
 from torch_geometric.datasets import Planetoid
@@ -18,28 +23,44 @@ from models import PPGNN, GCN, GraphSAGE, GAT
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def get_model(name: str, in_channels: int, num_classes: int):
-    """Create a model by name with common hyper-parameters."""
-    params = dict(in_channels=in_channels, hidden=64, num_classes=num_classes)
+def get_model(name: str, in_channels: int, num_classes: int, cfg: Dict[str, Any] | None = None):
+    """Create a model by name with hyper-parameters from *cfg*."""
+    cfg = cfg or {}
+    params = dict(in_channels=in_channels, hidden=cfg.get("hidden", 64), num_classes=num_classes)
     if name == "ppgnn":
-        # 回到你那组更稳的配置（15/0.1/steps=2），dropout 稍降到 0.3
         return PPGNN(
             **params,
-            layers=15,
-            dt=0.1,
-            dropout=0.4,
-            norm_type="sym", # 'sym' or 'rw'
-            jacobi_steps=2,
-            use_x_only=True,
-            y0_mode="ones",
+            layers=cfg.get("layers", 15),
+            dt=cfg.get("dt", 0.1),
+            dropout=cfg.get("dropout", 0.4),
+            norm_type=cfg.get("norm_type", "sym"),
+            jacobi_steps=cfg.get("jacobi_steps", 2),
+            use_x_only=cfg.get("use_x_only", True),
+            y0_mode=cfg.get("y0_mode", "ones"),
         )
     if name == "gcn":
-        return GCN(**params, layers=2)
+        return GCN(**params, layers=cfg.get("layers", 2))
     if name == "sage":
-        return GraphSAGE(**params, layers=2)
+        return GraphSAGE(**params, layers=cfg.get("layers", 2))
     if name == "gat":
-        return GAT(**params, heads=8, layers=2)
+        return GAT(**params, heads=cfg.get("heads", 8), layers=cfg.get("layers", 2))
     raise ValueError(name)
+
+
+def load_yaml_config(dataset: str, cfg_dir: str = "configs") -> Dict[str, Any]:
+    """Load configuration for *dataset* from *cfg_dir*.
+
+    If PyYAML is unavailable, the file is parsed as JSON.
+    """
+    path = Path(cfg_dir) / f"{dataset}.yaml"
+    if not path.is_file():
+        return {}
+    with path.open("r", encoding="utf-8") as f:
+        if yaml is not None:
+            data = yaml.safe_load(f)
+        else:
+            data = json.load(f)
+    return data or {}
 
 
 def load_dataset(name: str) -> Dict:
@@ -80,15 +101,17 @@ def load_dataset(name: str) -> Dict:
     raise ValueError(f"Unknown dataset: {name}")
 
 
-def train_node(data, model_name: str, epochs: int, num_classes: int):
-    model = get_model(model_name, data.num_features, num_classes).to(DEVICE)
+def train_node(data, model_name: str, num_classes: int, cfg: Dict[str, Any], default_epochs: int | None):
+    model = get_model(model_name, data.num_features, num_classes, cfg.get("model")).to(DEVICE)
 
+    train_cfg = cfg.get("train", {})
+    epochs = default_epochs if default_epochs is not None else train_cfg.get("epochs", 600)
     optim = torch.optim.Adam(
         model.parameters(),
-        lr=2e-3 if model_name == "ppgnn" else 1e-2,
-        weight_decay=5e-4 if model_name == "ppgnn" else 5e-4,
+        lr=train_cfg.get("lr", 2e-3 if model_name == "ppgnn" else 1e-2),
+        weight_decay=train_cfg.get("weight_decay", 5e-4 if model_name == "ppgnn" else 5e-4),
     )
-    clip_value = 5.0 if model_name == "ppgnn" else None
+    clip_value = train_cfg.get("clip_value", 5.0 if model_name == "ppgnn" else None)
 
     best_val = best_test = 0.0
     for epoch in range(1, epochs + 1):
@@ -118,15 +141,17 @@ def train_node(data, model_name: str, epochs: int, num_classes: int):
     print(f"★ Best val={best_val:.3f}  corresponding test={best_test:.3f}")
 
 
-def train_graph(loaders: Dict[str, DataLoader], model_name: str, epochs: int, in_channels: int, num_targets: int):
-    model = get_model(model_name, in_channels, num_targets).to(DEVICE)
+def train_graph(loaders: Dict[str, DataLoader], model_name: str, in_channels: int, num_targets: int, cfg: Dict[str, Any], default_epochs: int | None):
+    model = get_model(model_name, in_channels, num_targets, cfg.get("model")).to(DEVICE)
 
+    train_cfg = cfg.get("train", {})
+    epochs = default_epochs if default_epochs is not None else train_cfg.get("epochs", 600)
     optim = torch.optim.Adam(
         model.parameters(),
-        lr=2e-3 if model_name == "ppgnn" else 1e-2,
-        weight_decay=5e-4 if model_name == "ppgnn" else 5e-4,
+        lr=train_cfg.get("lr", 2e-3 if model_name == "ppgnn" else 1e-2),
+        weight_decay=train_cfg.get("weight_decay", 5e-4 if model_name == "ppgnn" else 5e-4),
     )
-    clip_value = 5.0 if model_name == "ppgnn" else None
+    clip_value = train_cfg.get("clip_value", 5.0 if model_name == "ppgnn" else None)
 
     def evaluate(loader: DataLoader) -> float:
         model.eval()
@@ -152,11 +177,7 @@ def train_graph(loaders: Dict[str, DataLoader], model_name: str, epochs: int, in
             out = global_mean_pool(out, batch.batch)
             loss = F.l1_loss(out, batch.y)
             loss.backward()
-            if clip_value is not None:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), clip_value)
-            optim.step()
 
-        # eval
         val_mae = evaluate(loaders["val"])
         test_mae = evaluate(loaders["test"])
         if val_mae < best_val:
@@ -173,7 +194,7 @@ def main(argv: Iterable[str] | None = None):
     parser.add_argument(
         "--dataset",
         nargs="+",
-        default=["Cora"],  # "Cora", "CiteSeer", "PubMed"
+        default=["CiteSeer"],  # "Cora", "CiteSeer", "PubMed"
         help="Dataset(s) to evaluate",
     )
     parser.add_argument(
@@ -182,7 +203,8 @@ def main(argv: Iterable[str] | None = None):
         default=["ppgnn", "gcn"],
         help="Models to train",
     )
-    parser.add_argument("--epochs", type=int, default=600, help="Training epochs")
+    parser.add_argument("--epochs", type=int, default=None, help="Override training epochs")
+    parser.add_argument("--config-dir", type=str, default="configs", help="Configuration directory")
     args = parser.parse_args(argv)
 
     set_seed(42)
@@ -190,18 +212,21 @@ def main(argv: Iterable[str] | None = None):
     for dataset_name in args.dataset:
         print(f"\n=== Dataset: {dataset_name} ===")
         info = load_dataset(dataset_name)
+        cfg = load_yaml_config(dataset_name, args.config_dir)
 
         for model_name in args.models:
             print(f"\n--- {model_name.upper()} ---")
+            model_cfg = cfg.get(model_name, {})
             if info["task"] == "node":
-                train_node(info["data"], model_name, args.epochs, info["num_classes"])
+                train_node(info["data"], model_name, info["num_classes"], model_cfg, args.epochs)
             else:
                 train_graph(
                     info["loaders"],
                     model_name,
-                    args.epochs,
                     info["in_channels"],
                     info["num_classes"],
+                    model_cfg,
+                    args.epochs,
                 )
 
 
