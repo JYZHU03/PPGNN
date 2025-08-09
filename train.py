@@ -194,7 +194,7 @@ def main(argv: Iterable[str] | None = None):
     parser.add_argument(
         "--dataset",
         nargs="+",
-        default=["CiteSeer"],  # "Cora", "CiteSeer", "PubMed"
+        default=["PubMed"],  # "Cora", "CiteSeer", "PubMed"
         help="Dataset(s) to evaluate",
     )
     parser.add_argument(
