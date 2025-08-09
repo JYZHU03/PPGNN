@@ -21,6 +21,10 @@ class PPGNN(nn.Module):
         jacobi_steps: int = 2,         # 回到 2 步（和你 0.79 那组一致）
         use_x_only: bool = True,       # 只用 X 通道读出
         y0_mode: str = "ones",         # Y 初值先用常数 1，训练更稳
+        alpha0: float = 0.2,
+        beta0: float = 0.1,
+        dx0: float = 0.7,
+        dy0: float = 0.8,
     ):
         super().__init__()
         self.hidden = hidden
@@ -39,6 +43,10 @@ class PPGNN(nn.Module):
                 dt=dt,
                 norm_type=norm_type,
                 jacobi_steps=jacobi_steps,
+                alpha0=alpha0,
+                beta0=beta0,
+                dx0=dx0,
+                dy0=dy0,
             )
             for _ in range(layers)
         ])
@@ -79,8 +87,9 @@ class PPGNN(nn.Module):
 
 # ---------- Baseline GNNs（保持不变） ----------
 class GCN(nn.Module):
-    def __init__(self, in_channels, hidden, num_classes, layers=2):
+    def __init__(self, in_channels, hidden, num_classes, layers=2, dropout=0.5):
         super().__init__()
+        self.dropout = dropout
         self.convs = nn.ModuleList()
         self.convs.append(GCNConv(in_channels, hidden))
         for _ in range(layers - 2):
@@ -91,12 +100,14 @@ class GCN(nn.Module):
         x = data.x
         for conv in self.convs[:-1]:
             x = conv(x, data.edge_index).relu()
+            x = F.dropout(x, p=self.dropout, training=self.training)
         return self.convs[-1](x, data.edge_index)
 
 
 class GraphSAGE(nn.Module):
-    def __init__(self, in_channels, hidden, num_classes, layers=2):
+    def __init__(self, in_channels, hidden, num_classes, layers=2, dropout=0.5):
         super().__init__()
+        self.dropout = dropout
         self.convs = nn.ModuleList()
         self.convs.append(SAGEConv(in_channels, hidden))
         for _ in range(layers - 2):
@@ -107,16 +118,19 @@ class GraphSAGE(nn.Module):
         x = data.x
         for conv in self.convs[:-1]:
             x = conv(x, data.edge_index).relu()
+            x = F.dropout(x, p=self.dropout, training=self.training)
         return self.convs[-1](x, data.edge_index)
 
 
 class GAT(nn.Module):
-    def __init__(self, in_channels, hidden, num_classes, heads=8, layers=2):
+    def __init__(self, in_channels, hidden, num_classes, heads=8, layers=2, dropout=0.5):
         super().__init__()
+        self.dropout = dropout
         self.convs = nn.ModuleList()
         self.convs.append(GATConv(in_channels, hidden, heads=heads))
         for _ in range(layers - 2):
             self.convs.append(GATConv(hidden * heads, hidden, heads=heads))
+            x = F.dropout(x, p=self.dropout, training=self.training)
         self.convs.append(GATConv(hidden * heads, num_classes,
                                   heads=1, concat=False))
 

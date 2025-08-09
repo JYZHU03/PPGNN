@@ -37,13 +37,18 @@ def get_model(name: str, in_channels: int, num_classes: int, cfg: Dict[str, Any]
             jacobi_steps=cfg.get("jacobi_steps", 2),
             use_x_only=cfg.get("use_x_only", True),
             y0_mode=cfg.get("y0_mode", "ones"),
+            alpha0=cfg.get("alpha0", 0.2),
+            beta0=cfg.get("beta0", 0.1),
+            dx0=cfg.get("dx0", 0.7),
+            dy0=cfg.get("dy0", 0.8),
         )
     if name == "gcn":
-        return GCN(**params, layers=cfg.get("layers", 2))
+        return GCN(**params, layers=cfg.get("layers", 2), dropout=cfg.get("dropout", 0.5))
     if name == "sage":
-        return GraphSAGE(**params, layers=cfg.get("layers", 2))
+        return GraphSAGE(**params, layers=cfg.get("layers", 2), dropout=cfg.get("dropout", 0.5))
     if name == "gat":
-        return GAT(**params, heads=cfg.get("heads", 8), layers=cfg.get("layers", 2))
+        return GAT(**params, heads=cfg.get("heads", 8), ayers=cfg.get("layers", 2), dropout=cfg.get("dropout", 0.5),
+        )
     raise ValueError(name)
 
 
@@ -129,6 +134,7 @@ def train_node(data, model_name: str, num_classes: int, cfg: Dict[str, Any], def
     clip_value = train_cfg.get("clip_value", 5.0 if model_name == "ppgnn" else None)
 
     best_val = best_test = 0.0
+    best_epoch = 0
     for epoch in range(1, epochs + 1):
         # train
         model.train()
@@ -151,16 +157,23 @@ def train_node(data, model_name: str, num_classes: int, cfg: Dict[str, Any], def
         model.eval()
         with torch.no_grad():
             logits = model(data)
+            train_loss = F.cross_entropy(logits[train_mask], data.y[train_mask])
+            val_loss = F.cross_entropy(logits[val_mask], data.y[val_mask])
+            test_loss = F.cross_entropy(logits[test_mask], data.y[test_mask])
+            train_acc = accuracy(logits[train_mask], data.y[train_mask])
             val_acc = accuracy(logits[val_mask], data.y[val_mask])
             test_acc = accuracy(logits[test_mask], data.y[test_mask])
 
         if val_acc > best_val:
-            best_val, best_test = val_acc, test_acc
+            best_val, best_test, best_epoch = val_acc, test_acc, epoch
 
         if epoch == 1 or epoch % 20 == 0 or epoch == epochs:
-            print(f"E{epoch:03d}  loss:{loss:.3f}  val:{val_acc:.3f}  test:{test_acc:.3f}")
+            print(
+                f"Epoch: {epoch:03d}  train_loss:{train_loss:.3f}  val_loss:{val_loss:.3f}  test_loss:{test_loss:.3f}  "
+                f"train_acc:{train_acc:.3f}  val_acc:{val_acc:.3f}  test_acc:{test_acc:.3f}"
+            )
 
-    print(f"★ Best val={best_val:.3f}  corresponding test={best_test:.3f}")
+    print(f"★  Best epoch in evaluation split: Epoch={best_epoch}  val={best_val:.3f}  corresponding test={best_test:.3f}")
 
 
 def train_graph(loaders: Dict[str, DataLoader], model_name: str, in_channels: int, num_targets: int, cfg: Dict[str, Any], default_epochs: int | None):
@@ -189,6 +202,7 @@ def train_graph(loaders: Dict[str, DataLoader], model_name: str, in_channels: in
 
     best_val = float("inf")
     best_test = float("inf")
+    best_epoch = 0
     for epoch in range(1, epochs + 1):
         # train
         model.train()
@@ -200,15 +214,16 @@ def train_graph(loaders: Dict[str, DataLoader], model_name: str, in_channels: in
             loss = F.l1_loss(out, batch.y)
             loss.backward()
 
+        train_mae = evaluate(loaders["train"])
         val_mae = evaluate(loaders["val"])
         test_mae = evaluate(loaders["test"])
         if val_mae < best_val:
-            best_val, best_test = val_mae, test_mae
+            best_val, best_test, best_epoch = val_mae, test_mae, epoch
 
-        if epoch == 1 or epoch % 10 == 0 or epoch == epochs:
-            print(f"E{epoch:03d}  val:{val_mae:.4f}  test:{test_mae:.4f}")
+        if epoch == 1 or epoch % 1 == 0 or epoch == epochs:
+            print(f"Epoch: {epoch:03d}  train:{train_mae:.4f}  val:{val_mae:.4f}  test:{test_mae:.4f}")
 
-    print(f"★ Best val={best_val:.4f}  corresponding test={best_test:.4f}")
+    print(f"★ Best epoch in evaluation split: Epoch={best_epoch}  val={best_val:.4f}  corresponding test={best_test:.4f}")
 
 
 def main(argv: Iterable[str] | None = None):
@@ -216,13 +231,13 @@ def main(argv: Iterable[str] | None = None):
     parser.add_argument(
         "--dataset",
         nargs="+",
-        default=["Cora"],  # e.g. "Cora", "CiteSeer", "PubMed", "Cornell", "Texas", "Wisconsin"
+        default=["Texas"],  # e.g. "Cora", "CiteSeer", "PubMed", "Cornell", "Texas", "Wisconsin"
         help="Dataset(s) to evaluate",
     )
     parser.add_argument(
         "--models",
         nargs="+",
-        default=["ppgnn", "gcn"],
+        default=["ppgnn", "gcn"], # e.g. "ppgnn", "gcn", "sage", "gat"
         help="Models to train",
     )
     parser.add_argument("--epochs", type=int, default=None, help="Override training epochs")

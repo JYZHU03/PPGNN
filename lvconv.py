@@ -23,6 +23,10 @@ class LVConv(MessagePassing):
         norm_type: str = "sym",         # 'sym' or 'rw'
         jacobi_steps: int = 2,          # 1~3，2/3 更稳
         eps: float = 1e-3,
+        alpha0: float = 0.2,
+        beta0: float = 0.1,
+        dx0: float = 0.7,
+        dy0: float = 0.8,
     ):
         super().__init__(aggr="add")
         assert norm_type in {"sym", "rw"}
@@ -51,10 +55,10 @@ class LVConv(MessagePassing):
 
 
         with torch.no_grad():
-            a0 = softplus_inv(0.2)
-            b0 = softplus_inv(0.1)
-            d0x = softplus_inv(0.7)
-            d0y = softplus_inv(0.8)
+            a0 = softplus_inv(alpha0)
+            b0 = softplus_inv(beta0)
+            d0x = softplus_inv(dx0)
+            d0y = softplus_inv(dy0)
             self.alpha.fill_(a0)
             self.gamma.fill_(a0)
             self.beta.fill_(b0)

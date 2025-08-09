@@ -8,7 +8,11 @@
       "norm_type": "sym",
       "jacobi_steps": 2,
       "use_x_only": true,
-      "y0_mode": "ones"
+      "y0_mode": "ones",
+      "alpha0": 0.2,
+      "beta0": 0.1,
+      "dx0": 0.7,
+      "dy0": 0.8
     },
     "train": {
       "epochs": 2000,
@@ -20,7 +24,8 @@
   "gcn": {
     "model": {
       "hidden": 64,
-      "layers": 2
+      "layers": 2,
+      "dropout": 0.2
     },
     "train": {
       "epochs": 200,
