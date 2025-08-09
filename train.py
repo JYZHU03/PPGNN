@@ -11,7 +11,7 @@ except Exception:  # pragma: no cover - fallback if PyYAML is absent
 import json
 import torch
 import torch.nn.functional as F
-from torch_geometric.datasets import Planetoid
+from torch_geometric.datasets import Planetoid, WebKB
 from torch_geometric.loader import DataLoader
 from torch_geometric.transforms import NormalizeFeatures, ToUndirected, Compose
 from torch_geometric.nn import global_mean_pool
@@ -79,6 +79,21 @@ def load_dataset(name: str) -> Dict:
             data=data,
         )
 
+    if name in {"Cornell", "Texas", "Wisconsin"}:
+        dataset = WebKB(
+            root="data/WebKB",
+            name=name,
+            transform=Compose([NormalizeFeatures(), ToUndirected()]),
+        )
+        data = dataset[0].to(DEVICE)
+        return dict(
+            task="node",
+            in_channels=dataset.num_features,
+            num_classes=dataset.num_classes,
+            data=data,
+        )
+
+
     # 如需 graph-level 任务，按需开启
     # from torch_geometric.datasets import PeptidesStructuralDataset
     # if name == "peptides-struct":
@@ -119,7 +134,14 @@ def train_node(data, model_name: str, num_classes: int, cfg: Dict[str, Any], def
         model.train()
         optim.zero_grad()
         out = model(data)
-        loss = F.cross_entropy(out[data.train_mask], data.y[data.train_mask])
+        train_mask = data.train_mask
+        val_mask = data.val_mask
+        test_mask = data.test_mask
+        if train_mask.dim() > 1:
+            train_mask = train_mask[:, 0]
+            val_mask = val_mask[:, 0]
+            test_mask = test_mask[:, 0]
+        loss = F.cross_entropy(out[train_mask], data.y[train_mask])
         loss.backward()
         if clip_value is not None:
             torch.nn.utils.clip_grad_norm_(model.parameters(), clip_value)
@@ -129,8 +151,8 @@ def train_node(data, model_name: str, num_classes: int, cfg: Dict[str, Any], def
         model.eval()
         with torch.no_grad():
             logits = model(data)
-            val_acc = accuracy(logits[data.val_mask], data.y[data.val_mask])
-            test_acc = accuracy(logits[data.test_mask], data.y[data.test_mask])
+            val_acc = accuracy(logits[val_mask], data.y[val_mask])
+            test_acc = accuracy(logits[test_mask], data.y[test_mask])
 
         if val_acc > best_val:
             best_val, best_test = val_acc, test_acc
@@ -194,7 +216,7 @@ def main(argv: Iterable[str] | None = None):
     parser.add_argument(
         "--dataset",
         nargs="+",
-        default=["PubMed"],  # "Cora", "CiteSeer", "PubMed"
+        default=["Cora"],  # e.g. "Cora", "CiteSeer", "PubMed", "Cornell", "Texas", "Wisconsin"
         help="Dataset(s) to evaluate",
     )
     parser.add_argument(

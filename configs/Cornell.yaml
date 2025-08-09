@@ -2,16 +2,16 @@
   "ppgnn": {
     "model": {
       "hidden": 64,
-      "layers": 15,
+      "layers": 2,
       "dt": 0.1,
       "dropout": 0.4,
-      "norm_type": "sym",
+      "norm_type": "rw",
       "jacobi_steps": 2,
       "use_x_only": true,
       "y0_mode": "ones"
     },
     "train": {
-      "epochs": 600,
+      "epochs": 200,
       "lr": 0.002,
       "weight_decay": 0.0005,
       "clip_value": 5.0
@@ -23,7 +23,7 @@
       "layers": 2
     },
     "train": {
-      "epochs": 600,
+      "epochs": 200,
       "lr": 0.01,
       "weight_decay": 0.0005
     }

@@ -49,16 +49,29 @@ class LVConv(MessagePassing):
         def softplus_inv(y: float) -> float:
             return math.log(math.exp(y) - 1.0)
 
+
         with torch.no_grad():
             a0 = softplus_inv(0.2)
             b0 = softplus_inv(0.1)
-            d0 = softplus_inv(0.8)
+            d0x = softplus_inv(0.7)
+            d0y = softplus_inv(0.8)
             self.alpha.fill_(a0)
             self.gamma.fill_(a0)
             self.beta.fill_(b0)
             self.delta.fill_(b0)
-            self.Dx.fill_(d0)
-            self.Dy.fill_(d0)
+            self.Dx.fill_(d0x)
+            self.Dy.fill_(d0y)
+
+        # with torch.no_grad():
+        #     # 反应系数：alpha/gamma 稍强，beta/delta 中等
+        #     self.alpha.fill_(softplus_inv(0.20))
+        #     self.gamma.fill_(softplus_inv(0.20))
+        #     self.beta.fill_(softplus_inv(0.15))
+        #     self.delta.fill_(softplus_inv(0.25))
+        #
+        #     # 关键：抑制扩散 >> 激活扩散，且绝对值小
+        #     self.Dx.fill_(softplus_inv(0.02))  # activator: very slow
+        #     self.Dy.fill_(softplus_inv(0.60))  # inhibitor: much faster
 
     def forward(self, h: torch.Tensor, edge_index: torch.Tensor):
         """
