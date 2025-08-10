@@ -87,7 +87,7 @@ def main(argv: Iterable[str] | None = None):
     parser.add_argument(
         "--dataset",
         nargs="+",
-        default=["ZINC"], # e.g. "Cora", "CiteSeer", "PubMed", "Cornell", "Texas", "Wisconsin", "ZINC", "ogbn-arxiv", "tr20_teTexas"
+        default=["tr20_teTexas"], # e.g. "Cora", "CiteSeer", "PubMed", "Cornell", "Texas", "Wisconsin", "ZINC", "MNIST", "ogbn-arxiv", "tr20_teTexas"
         help="Dataset(s) to evaluate",
     )
     parser.add_argument(

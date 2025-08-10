@@ -12,7 +12,7 @@ loaders.
 from typing import Dict
 
 import torch
-from torch_geometric.datasets import Planetoid, WebKB, ZINC
+from torch_geometric.datasets import Planetoid, WebKB, ZINC, MNISTSuperpixels
 from torch_geometric.loader import DataLoader
 from torch_geometric.transforms import Compose, NormalizeFeatures, ToUndirected
 from torch_geometric.data import Batch
@@ -80,6 +80,24 @@ def load_dataset(name: str) -> Dict:
             task="regression",
             in_channels=train_ds.num_features,
             out_channels=out_dim,
+            loaders=loaders,
+        )
+
+    if name in {"MNIST", "MNISTSuperpixels"}:
+        train_full = MNISTSuperpixels(root="data/MNIST", train=True).shuffle()
+        test_ds = MNISTSuperpixels(root="data/MNIST", train=False)
+        train_ds = train_full[:55000]
+        val_ds = train_full[55000:]
+        loaders = {
+            "train": DataLoader(train_ds, batch_size=64, shuffle=True),
+            "val": DataLoader(val_ds, batch_size=128),
+            "test": DataLoader(test_ds, batch_size=128),
+        }
+        return dict(
+            level="graph",
+            task="classification",
+            in_channels=train_ds.num_features,
+            out_channels=10,
             loaders=loaders,
         )
 

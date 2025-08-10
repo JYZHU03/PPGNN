@@ -61,9 +61,9 @@ class PPGNN(nn.Module):
 
     def forward(self, data):
         # lift：改回 tanh（避免 ReLU 大面积卡零，把 LV 乘法项打没）
-        X0 = torch.tanh(self.lift_x(data.x))
+        X0 = torch.tanh(self.lift_x(data.x.float()))
         if self.y0_mode == "learned":
-            Y0 = torch.tanh(self.lift_y(data.x))
+            Y0 = torch.tanh(self.lift_y(data.x.float()))
         else:
             Y0 = torch.ones_like(X0)
 
@@ -97,7 +97,7 @@ class GCN(nn.Module):
         self.convs.append(GCNConv(hidden, num_classes))
 
     def forward(self, data):
-        x = data.x
+        x = data.x.float()
         for conv in self.convs[:-1]:
             x = conv(x, data.edge_index).relu()
             x = F.dropout(x, p=self.dropout, training=self.training)
@@ -115,7 +115,7 @@ class GraphSAGE(nn.Module):
         self.convs.append(SAGEConv(hidden, num_classes))
 
     def forward(self, data):
-        x = data.x
+        x = data.x.float()
         for conv in self.convs[:-1]:
             x = conv(x, data.edge_index).relu()
             x = F.dropout(x, p=self.dropout, training=self.training)
@@ -130,12 +130,13 @@ class GAT(nn.Module):
         self.convs.append(GATConv(in_channels, hidden, heads=heads))
         for _ in range(layers - 2):
             self.convs.append(GATConv(hidden * heads, hidden, heads=heads))
-            x = F.dropout(x, p=self.dropout, training=self.training)
-        self.convs.append(GATConv(hidden * heads, num_classes,
-                                  heads=1, concat=False))
+        self.convs.append(
+            GATConv(hidden * heads, num_classes, heads=1, concat=False)
+        )
 
     def forward(self, data):
-        x = data.x
+        x = data.x.float()
         for conv in self.convs[:-1]:
             x = conv(x, data.edge_index).relu()
+            x = F.dropout(x, p=self.dropout, training=self.training)
         return self.convs[-1](x, data.edge_index)
