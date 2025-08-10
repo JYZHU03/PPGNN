@@ -15,6 +15,8 @@ import torch
 from torch_geometric.datasets import Planetoid, WebKB, ZINC
 from torch_geometric.loader import DataLoader
 from torch_geometric.transforms import Compose, NormalizeFeatures, ToUndirected
+from torch_geometric.data import Batch
+from power_grid_data import preformat_Powergrid
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -79,6 +81,60 @@ def load_dataset(name: str) -> Dict:
             in_channels=train_ds.num_features,
             out_channels=out_dim,
             loaders=loaders,
+        )
+
+    if name == "ogbn-arxiv":
+            from ogb.nodeproppred import PygNodePropPredDataset
+            dataset = PygNodePropPredDataset(root="data/ogbn-arxiv", name="ogbn-arxiv")
+            data = dataset[0].to(DEVICE)
+            split_idx = dataset.get_idx_split()
+            data.train_mask = torch.zeros(data.num_nodes, dtype=torch.bool)
+            data.val_mask = torch.zeros(data.num_nodes, dtype=torch.bool)
+            data.test_mask = torch.zeros(data.num_nodes, dtype=torch.bool)
+            data.train_mask[split_idx["train"]] = True
+            data.val_mask[split_idx["valid"]] = True
+            data.test_mask[split_idx["test"]] = True
+            data.y = data.y.squeeze()
+            return dict(
+                level="node",
+                task="classification",
+                in_channels=dataset.num_features,
+                out_channels=dataset.num_classes,
+                data=data,
+            )
+
+    if name == "tr20_teTexas":
+        dataset = preformat_Powergrid(
+            "data/PowerGrid",
+            train_dataset="dataset20",
+            test_dataset="Texas",
+        )
+        data_list = [dataset[i] for i in range(len(dataset))]
+        batch = Batch.from_data_list(data_list).to(DEVICE)
+        train_idx, val_idx, test_idx = dataset.split_idxs
+        train_mask = torch.zeros(batch.num_nodes, dtype=torch.bool)
+        val_mask = torch.zeros(batch.num_nodes, dtype=torch.bool)
+        test_mask = torch.zeros(batch.num_nodes, dtype=torch.bool)
+        ptr = 0
+        for i, d in enumerate(data_list):
+            n = d.num_nodes
+            if i in train_idx:
+                train_mask[ptr:ptr + n] = True
+            elif i in val_idx:
+                val_mask[ptr:ptr + n] = True
+            else:
+                test_mask[ptr:ptr + n] = True
+            ptr += n
+        batch.train_mask = train_mask
+        batch.val_mask = val_mask
+        batch.test_mask = test_mask
+        out_dim = batch.y.size(-1) if batch.y.ndim > 1 else 1
+        return dict(
+            level="node",
+            task="regression",
+            in_channels=batch.num_features,
+            out_channels=out_dim,
+            data=batch,
         )
 
     raise ValueError(f"Unknown dataset: {name}")
