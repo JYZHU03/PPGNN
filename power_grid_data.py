@@ -178,10 +178,11 @@ class Powergrid(InMemoryDataset):
 
     def process(self):
         for split in ['train', 'valid', 'test']:
+            dataset_root = osp.join(self.raw_dir, 'datasets')
             if split == 'test':
-                path2= osp.join(self.raw_dir, self.test_dataset, split)
+                path2 = osp.join(dataset_root, self.test_dataset, split)
             else:
-                path2 = osp.join(self.raw_dir, self.train_dataset, split)
+                path2 = osp.join(dataset_root, self.train_dataset, split)
 
             data_len, start_index, digits = get_length_of_dataset(path2)
             num_digits = '0' + str(len(str(digits)))
@@ -189,7 +190,7 @@ class Powergrid(InMemoryDataset):
 
             if split == 'test':
                 file_path = osp.join(
-                    self.raw_dir,
+                    dataset_root,
                     self.test_dataset,
                     'Netsci',
                     split,
@@ -197,7 +198,7 @@ class Powergrid(InMemoryDataset):
                 )
             else:
                 file_path = osp.join(
-                    self.raw_dir,
+                    dataset_root,
                     self.train_dataset,
                     'Netsci',
                     split,
@@ -225,14 +226,14 @@ class Powergrid(InMemoryDataset):
                 # Load Graphlets
                 if split == 'test':
                     file_path_graphlets = osp.join(
-                        self.raw_dir,
+                        dataset_root,
                         self.test_dataset,
                         'Graphlets',
                         split,
                     )
                 else:
                     file_path_graphlets = osp.join(
-                        self.raw_dir,
+                        dataset_root,
                         self.train_dataset,
                         'Graphlets',
                         split,
