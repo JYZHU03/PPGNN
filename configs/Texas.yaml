@@ -4,18 +4,18 @@
       "hidden": 64,
       "layers": 2,
       "dt": 0.1,
-      "dropout": 0.4,
+      "dropout": 0.8,
       "norm_type": "sym",
       "jacobi_steps": 2,
-      "use_x_only": true,
-      "y0_mode": "ones",
+      "use_x_only": false,
+      "y0_mode": "learned",
       "alpha0": 0.2,
       "beta0": 0.1,
-      "dx0": 0.1,
+      "dx0": 0.01,
       "dy0": 0.8
     },
     "train": {
-      "epochs": 500,
+      "epochs": 300,
       "lr": 0.002,
       "weight_decay": 0.0005,
       "clip_value": 5.0
@@ -28,7 +28,32 @@
       "dropout": 0.4
     },
     "train": {
-      "epochs": 500,
+      "epochs": 300,
+      "lr": 0.01,
+      "weight_decay": 0.0005
+    }
+  },
+  "sage": {
+    "model": {
+      "hidden": 64,
+      "layers": 2,
+      "dropout": 0.4
+    },
+    "train": {
+      "epochs": 300,
+      "lr": 0.01,
+      "weight_decay": 0.0005
+    }
+  },
+  "gat": {
+    "model": {
+      "hidden": 8,
+      "heads": 8,
+      "layers": 2,
+      "dropout": 0.4
+    },
+    "train": {
+      "epochs": 300,
       "lr": 0.01,
       "weight_decay": 0.0005
     }

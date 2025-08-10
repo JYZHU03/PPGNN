@@ -33,5 +33,31 @@
       "lr": 0.01,
       "weight_decay": 0.0005
     }
+ },
+  "sage": {
+    "model": {
+      "hidden": 128,
+      "layers": 2,
+      "dropout": 0.4
+    },
+    "train": {
+      "epochs": 300,
+      "lr": 0.01,
+      "weight_decay": 0.0005
+    }
+  },
+  "gat": {
+    "model": {
+      "hidden": 16,
+      "heads": 8,
+      "layers": 2,
+      "dropout": 0.4
+    },
+    "train": {
+      "epochs": 300,
+      "lr": 0.01,
+      "weight_decay": 0.0005
+    }
   }
 }
+

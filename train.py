@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Dict, Iterable, Any
+from typing import Dict, Iterable, Any, Tuple
 
 try:  # Optional YAML dependency
     import yaml  # type: ignore
@@ -14,10 +14,11 @@ import torch.nn.functional as F
 from torch_geometric.datasets import Planetoid, WebKB
 from torch_geometric.loader import DataLoader
 from torch_geometric.transforms import NormalizeFeatures, ToUndirected, Compose
-from torch_geometric.nn import global_mean_pool
 
-from utils import set_seed, accuracy, mae
+from utils import set_seed, accuracy, mae, r2
 from models import PPGNN, GCN, GraphSAGE, GAT
+from power_grid_data import preformat_Powergrid
+
 
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -47,7 +48,7 @@ def get_model(name: str, in_channels: int, num_classes: int, cfg: Dict[str, Any]
     if name == "sage":
         return GraphSAGE(**params, layers=cfg.get("layers", 2), dropout=cfg.get("dropout", 0.5))
     if name == "gat":
-        return GAT(**params, heads=cfg.get("heads", 8), ayers=cfg.get("layers", 2), dropout=cfg.get("dropout", 0.5),
+        return GAT(**params, heads=cfg.get("heads", 8), layers=cfg.get("layers", 2), dropout=cfg.get("dropout", 0.5),
         )
     raise ValueError(name)
 
@@ -117,6 +118,28 @@ def load_dataset(name: str) -> Dict:
     #         num_classes=target_dim,
     #         loaders=loaders,
     #     )
+
+    if name.startswith("tr") and "_te" in name:
+        split = name[2:name.index("_te")]
+        test_name = name[name.index("_te") + 3:]
+        train_dataset = f"datasets/dataset{split}"
+        test_dataset = f"datasets/{test_name}"
+        dataset_dir = f"datasets/{name}"
+        dataset = preformat_Powergrid(dataset_dir, train_dataset, test_dataset)
+        idx_train, idx_val, idx_test = dataset.split_idxs
+        loaders = {
+            "train": DataLoader(dataset[idx_train], batch_size=32, shuffle=True),
+            "val": DataLoader(dataset[idx_val], batch_size=64),
+            "test": DataLoader(dataset[idx_test], batch_size=64),
+        }
+        y = dataset[0].y
+        num_classes = y.size(-1) if y.ndim > 1 else 1
+        return dict(
+            task="graph",
+            in_channels=dataset.num_node_features,
+            num_classes=num_classes,
+            loaders=loaders,
+        )
 
     raise ValueError(f"Unknown dataset: {name}")
 
@@ -188,17 +211,18 @@ def train_graph(loaders: Dict[str, DataLoader], model_name: str, in_channels: in
     )
     clip_value = train_cfg.get("clip_value", 5.0 if model_name == "ppgnn" else None)
 
-    def evaluate(loader: DataLoader) -> float:
+    def evaluate(loader: DataLoader) -> Tuple[float, float]:
         model.eval()
-        err = n = 0
+        preds, trues = [], []
         with torch.no_grad():
             for batch in loader:
                 batch = batch.to(DEVICE)
                 out = model(batch)
-                out = global_mean_pool(out, batch.batch)
-                err += mae(out, batch.y) * batch.y.size(0)
-                n += batch.y.size(0)
-        return err / n
+                preds.append(out.detach())
+                trues.append(batch.y.view_as(out).detach())
+        pred = torch.cat(preds, dim=0)
+        true = torch.cat(trues, dim=0)
+        return mae(pred, true), r2(pred, true)
 
     best_val = float("inf")
     best_test = float("inf")
@@ -210,20 +234,28 @@ def train_graph(loaders: Dict[str, DataLoader], model_name: str, in_channels: in
             batch = batch.to(DEVICE)
             optim.zero_grad()
             out = model(batch)
-            out = global_mean_pool(out, batch.batch)
-            loss = F.l1_loss(out, batch.y)
+            # loss = F.mse_loss(out, batch.y.view_as(out))
+            loss = F.l1_loss(out, batch.y.view_as(out))
             loss.backward()
+            if clip_value is not None:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), clip_value)
+            optim.step()
 
-        train_mae = evaluate(loaders["train"])
-        val_mae = evaluate(loaders["val"])
-        test_mae = evaluate(loaders["test"])
+        train_mae, train_r2 = evaluate(loaders["train"])
+        val_mae, val_r2 = evaluate(loaders["val"])
+        test_mae, test_r2 = evaluate(loaders["test"])
         if val_mae < best_val:
             best_val, best_test, best_epoch = val_mae, test_mae, epoch
 
         if epoch == 1 or epoch % 1 == 0 or epoch == epochs:
-            print(f"Epoch: {epoch:03d}  train:{train_mae:.4f}  val:{val_mae:.4f}  test:{test_mae:.4f}")
+            print(
+                f"Epoch: {epoch:03d}  train_mae:{train_mae:.4f}  train_r2:{train_r2:.4f}  "
+                f"val_mae:{val_mae:.4f}  val_r2:{val_r2:.4f}  test_mae:{test_mae:.4f}  test_r2:{test_r2:.4f}"
+            )
 
-    print(f"★ Best epoch in evaluation split: Epoch={best_epoch}  val={best_val:.4f}  corresponding test={best_test:.4f}")
+    print(
+        f"★ Best epoch in evaluation split: Epoch={best_epoch}  val_mae={best_val:.4f}  corresponding test_mae={best_test:.4f}"
+    )
 
 
 def main(argv: Iterable[str] | None = None):
@@ -231,20 +263,20 @@ def main(argv: Iterable[str] | None = None):
     parser.add_argument(
         "--dataset",
         nargs="+",
-        default=["Texas"],  # e.g. "Cora", "CiteSeer", "PubMed", "Cornell", "Texas", "Wisconsin"
+        default=["Texas"],  # e.g. "Cora", "CiteSeer", "PubMed", "Cornell", "Texas", "Wisconsin", "tr20_teTexas"
         help="Dataset(s) to evaluate",
     )
     parser.add_argument(
         "--models",
         nargs="+",
-        default=["ppgnn", "gcn"], # e.g. "ppgnn", "gcn", "sage", "gat"
+        default=["ppgnn", "gcn", "sage", "gat"], # e.g. "ppgnn", "gcn", "sage", "gat"
         help="Models to train",
     )
     parser.add_argument("--epochs", type=int, default=None, help="Override training epochs")
     parser.add_argument("--config-dir", type=str, default="configs", help="Configuration directory")
     args = parser.parse_args(argv)
 
-    set_seed(42)
+    set_seed(0) #42
 
     for dataset_name in args.dataset:
         print(f"\n=== Dataset: {dataset_name} ===")

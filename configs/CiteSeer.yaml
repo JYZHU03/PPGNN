@@ -15,7 +15,7 @@
       "dy0": 0.8
     },
     "train": {
-      "epochs": 600,
+      "epochs": 500,
       "lr": 0.002,
       "weight_decay": 0.0005,
       "clip_value": 5.0
@@ -24,6 +24,31 @@
   "gcn": {
     "model": {
       "hidden": 128,
+      "layers": 2,
+      "dropout": 0.5
+    },
+    "train": {
+      "epochs": 500,
+      "lr": 0.01,
+      "weight_decay": 0.0005
+    }
+  },
+  "sage": {
+    "model": {
+      "hidden": 128,
+      "layers": 2,
+      "dropout": 0.5
+    },
+    "train": {
+      "epochs": 600,
+      "lr": 0.01,
+      "weight_decay": 0.0005
+    }
+  },
+  "gat": {
+    "model": {
+      "hidden": 16,
+      "heads": 8,
       "layers": 2,
       "dropout": 0.5
     },
