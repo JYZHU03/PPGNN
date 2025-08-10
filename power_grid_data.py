@@ -163,43 +163,77 @@ class Powergrid(InMemoryDataset):
     def process(self):
         for split in ['train', 'valid', 'test']:
             if split == 'test':
-                path2 = osp.join(self.test_dataset, split)
+                path2 = osp.join(self.raw_dir, self.test_dataset, split)
             else:
-                path2 = osp.join(self.train_dataset, split)
-            data_len, start_index, digits = get_length_of_dataset(
-                path2)
-            num_digits = '0' + str(digits.__str__().__len__())
+                path2 = osp.join(self.raw_dir, self.train_dataset, split)
+
+            data_len, start_index, digits = get_length_of_dataset(path2)
+            num_digits = '0' + str(len(str(digits)))
             data_list = []
 
             if split == 'test':
-                file_path = self.test_dataset + '/Netsci/' + split + '/network_measures_final.csv'
+                file_path = osp.join(
+                    self.raw_dir,
+                    self.test_dataset,
+                    'Netsci',
+                    split,
+                    'network_measures_final.csv',
+                )
             else:
-                file_path = self.train_dataset + '/Netsci/' + split + '/network_measures_final.csv'
+                file_path = osp.join(
+                    self.raw_dir,
+                    self.train_dataset,
+                    'Netsci',
+                    split,
+                    'network_measures_final.csv',
+                )
 
-            ##Load data
+            # Load data
             csv_data = self.__read_NetSci_csv_file__(file_path)
             tensor_data = torch.tensor(csv_data, dtype=torch.float)
 
             len_sum = 0
             start_idx = 0
             for index in range(data_len):
-                x, edge_index, edge_attr = self.__get_input__(path2, num_digits, index + start_index)
+                x, edge_index, edge_attr = self.__get_input__(
+                    path2, num_digits, index + start_index
+                )
                 len_num = x.size(0)
                 len_sum = len_sum + len_num
 
                 Netsci_feature = tensor_data[start_idx:len_sum]
                 start_idx = len_sum
 
-                y = self.__get_label__(path2, num_digits, index + + start_index)
+                y = self.__get_label__(path2, num_digits, index + start_index)
 
-                ###load Graphlets
+                # Load Graphlets
                 if split == 'test':
-                    file_path_graphlets = self.test_dataset + '/Graphlets/' + split
+                    file_path_graphlets = osp.join(
+                        self.raw_dir,
+                        self.test_dataset,
+                        'Graphlets',
+                        split,
+                    )
                 else:
-                    file_path_graphlets = self.train_dataset + '/Graphlets/' + split
-                Graphlets_feature = self.__get_graphlets__(file_path_graphlets, num_digits, index + start_index)
-                data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr,
-                            y=y, Netsci_feature=Netsci_feature, Graphlets_feature=Graphlets_feature) ##这里
+                    file_path_graphlets = osp.join(
+                        self.raw_dir,
+                        self.train_dataset,
+                        'Graphlets',
+                        split,
+                    )
+
+                Graphlets_feature = self.__get_graphlets__(
+                    file_path_graphlets, num_digits, index + start_index
+                )
+
+                data = Data(
+                    x=x,
+                    edge_index=edge_index,
+                    edge_attr=edge_attr,
+                    y=y,
+                    Netsci_feature=Netsci_feature,
+                    Graphlets_feature=Graphlets_feature,
+                )
                 if self.pre_filter is not None and not self.pre_filter(data):
                     continue
 
