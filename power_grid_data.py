@@ -114,7 +114,23 @@ class Powergrid(InMemoryDataset):
 
     @property
     def raw_dir(self):
-        return os.path.abspath(os.path.join(self.root, '../../'))
+        """Return the directory containing the raw dataset.
+
+        The original implementation resolved the path two levels above the
+        provided ``root`` directory.  As a consequence, the data loader looked
+        for files such as ``dataset20/train`` in the repository root rather than
+        inside the specified dataset folder (e.g. ``data/PowerGrid``).  This
+        caused ``FileNotFoundError`` when the expected datasets were placed
+        within ``root``.
+
+        By using the supplied ``root`` directly we ensure that raw data is
+        located relative to the dataset directory passed to the constructor and
+        avoid missing file errors.
+        """
+
+        # ``self.root`` may be a relative path; make it absolute for
+        # consistency with the rest of the PyG dataset API.
+        return os.path.abspath(self.root)
 
     # @property
     def raw_file_names(self) -> List[str]:
@@ -163,7 +179,7 @@ class Powergrid(InMemoryDataset):
     def process(self):
         for split in ['train', 'valid', 'test']:
             if split == 'test':
-                path2 = osp.join(self.raw_dir, self.test_dataset, split)
+                path2= osp.join(self.raw_dir, self.test_dataset, split)
             else:
                 path2 = osp.join(self.raw_dir, self.train_dataset, split)
 
