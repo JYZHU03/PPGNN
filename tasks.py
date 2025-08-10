@@ -120,9 +120,9 @@ def train_node_regression(
         model.eval()
         with torch.no_grad():
             pred = model(data)
-            train_mae = mae(pred[train_mask], data.y[train_mask])
-            val_mae = mae(pred[val_mask], data.y[val_mask])
-            test_mae = mae(pred[test_mask], data.y[test_mask])
+            train_mae = mae(pred[train_mask], data.y[train_mask].view_as(pred[train_mask]))
+            val_mae = mae(pred[val_mask], data.y[val_mask].view_as(pred[val_mask]))
+            test_mae = mae(pred[test_mask], data.y[test_mask].view_as(pred[test_mask]))
 
         if val_mae < best_val:
             best_val, best_test, best_epoch = val_mae, test_mae, epoch
