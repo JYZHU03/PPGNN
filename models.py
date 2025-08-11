@@ -23,7 +23,7 @@ class PPGNN(nn.Module):
         y0_mode: str = "ones",         # Y 初值先用常数 1，训练更稳
         alpha0: float = 0.2,
         beta0: float = 0.1,
-        dx0: float = 0.7,
+        dx0: float = 0.15,
         dy0: float = 0.8,
     ):
         super().__init__()
