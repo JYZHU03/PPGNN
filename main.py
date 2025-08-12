@@ -14,6 +14,13 @@ import json
 
 import torch
 
+try:  # Optional MLflow dependency
+    import mlflow  # type: ignore
+except Exception:  # pragma: no cover - allow running without MLflow
+    mlflow = None
+
+
+
 from utils import set_seed
 from models import PPGNN, GCN, GraphSAGE, GAT
 from data import load_dataset
@@ -119,8 +126,19 @@ def main(argv: Iterable[str] | None = None):
             trainer = TRAINERS[(info["level"], info["task"])]
             train_cfg = model_cfg.get("train", {})
             data_or_loader = info.get("data") or info.get("loaders")
-            trainer(data_or_loader, model, model_name, train_cfg, args.epochs)
 
+            if mlflow is not None:
+                mlflow.set_experiment(dataset_name)
+                with mlflow.start_run(run_name=model_name):
+                    mlflow.log_param("dataset", dataset_name)
+                    mlflow.log_param("model", model_name)
+                    for k, v in model_cfg.get("model", {}).items():
+                        mlflow.log_param(f"model_{k}", v)
+                    for k, v in train_cfg.items():
+                        mlflow.log_param(f"train_{k}", v)
+                    trainer(data_or_loader, model, model_name, train_cfg, args.epochs)
+            else:
+                trainer(data_or_loader, model, model_name, train_cfg, args.epochs)
 
 if __name__ == "__main__":
     main()
