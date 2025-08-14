@@ -58,6 +58,7 @@ def get_model(
             beta0=cfg.get("beta0", 0.1),
             dx0=cfg.get("dx0", 0.7),
             dy0=cfg.get("dy0", 0.8),
+            norm=cfg.get("norm", "BatchNorm1d"),
         )
     if name == "gcn":
         return GCN(
@@ -116,7 +117,7 @@ def main(argv: Iterable[str] | None = None):
     parser.add_argument(
         "--models",
         nargs="+",
-        default=["gcn", "sage", "gat"],  # e.g. "ppgnn", "gcn", "sage", "gat"
+        default=["ppgnn","gcn", "sage", "gat"],  # e.g. "ppgnn", "gcn", "sage", "gat"
         help="Models to train",
     )
     parser.add_argument("--epochs", type=int, default=None, help="Override training epochs")

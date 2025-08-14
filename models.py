@@ -26,6 +26,7 @@ class PPGNN(nn.Module):
         beta0: float = 0.1,
         dx0: float = 0.15,
         dy0: float = 0.8,
+        norm: str = "BatchNorm1d",
         level: str = "node",
     ):
         super().__init__()
@@ -55,6 +56,17 @@ class PPGNN(nn.Module):
                 for _ in range(layers)
             ]
         )
+
+        norm = (norm or "none").lower()
+
+        def make_norm():
+            if norm == "batchnorm1d" or norm == "batchnorm":
+                return nn.BatchNorm1d(2 * hidden)
+            if norm == "layernorm" or norm == "ln":
+                return nn.LayerNorm(2 * hidden)
+            return nn.Identity()
+
+        self.norms = nn.ModuleList([make_norm() for _ in range(layers)])
 
         # 残差门控 τ
         self.taus = nn.ParameterList(
@@ -87,11 +99,12 @@ class PPGNN(nn.Module):
 
         h = torch.cat([X0, Y0], dim=-1)
 
-        for conv, tau_param in zip(self.layers, self.taus):
+        for conv, tau_param, norm in zip(self.layers, self.taus, self.norms):
             h = F.dropout(h, p=self.dropout, training=self.training)
             h_hat = conv(h, data.edge_index)
             tau = torch.sigmoid(tau_param)
             h = (1 - tau) * h + tau * h_hat
+            h = norm(h)
 
         if self.graph_head and hasattr(data, "batch") and self.readout is not None:
             if self.use_x_only:
