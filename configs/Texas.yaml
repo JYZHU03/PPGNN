@@ -11,9 +11,9 @@
       "y0_mode": "learned",
       "alpha0": 0.2,
       "beta0": 0.1,
-      "dx0": 0.01,
+      "dx0": 0.1,
       "dy0": 0.8,
-      "norm": "layernorm"
+      "norm": "BatchNorm1d"
     },
     "train": {
       "epochs": 300,
@@ -27,7 +27,7 @@
       "hidden": 64,
       "layers": 2,
       "dropout": 0.4,
-      "norm": "layernorm"
+      "norm": "none"
     },
     "train": {
       "epochs": 300,
@@ -40,7 +40,7 @@
       "hidden": 64,
       "layers": 2,
       "dropout": 0.4,
-      "norm": "layernorm"
+      "norm": "none"
     },
     "train": {
       "epochs": 300,

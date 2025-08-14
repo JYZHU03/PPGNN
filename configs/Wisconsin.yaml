@@ -13,7 +13,7 @@
       "beta0": 0.1,
       "dx0": 0.0007,
       "dy0": 0.8,
-      "norm": "layernorm"
+      "norm": "none"
     },
     "train": {
       "epochs": 200,

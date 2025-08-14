@@ -13,10 +13,10 @@
       "beta0": 0.1,
       "dx0": 0.7,
       "dy0": 0.8,
-      "norm": "layernorm"
+      "norm": "BatchNorm1d"
     },
     "train": {
-      "epochs": 710,
+      "epochs": 600,
       "lr": 0.002,
       "weight_decay": 0.0005,
       "clip_value": 5.0
@@ -27,7 +27,7 @@
       "hidden": 128,
       "layers": 2,
       "dropout": 0.4,
-      "norm": "layernorm"
+      "norm": "BatchNorm1d"
     },
     "train": {
       "epochs": 600,
@@ -40,7 +40,7 @@
       "hidden": 128,
       "layers": 2,
       "dropout": 0.4,
-      "norm": "layernorm"
+      "norm": "BatchNorm1d"
     },
     "train": {
       "epochs": 600,
@@ -54,7 +54,7 @@
       "heads": 8,
       "layers": 2,
       "dropout": 0.4,
-      "norm": "layernorm"
+      "norm": "BatchNorm1d"
     },
     "train": {
       "epochs": 600,
