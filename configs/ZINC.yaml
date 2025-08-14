@@ -40,7 +40,7 @@
       "hidden": 128,
       "layers": 3,
       "dropout": 0.5,
-      "norm": "None"
+      "norm": "BatchNorm1d"
     },
     "train": {
       "epochs": 100,
@@ -54,7 +54,7 @@
       "heads": 8,
       "layers": 3,
       "dropout": 0.5,
-      "norm": "None"
+      "norm": "BatchNorm1d"
     },
     "train": {
       "epochs": 100,
