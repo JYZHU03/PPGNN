@@ -9,54 +9,73 @@ from torch_geometric.nn import GCNConv, GATConv, SAGEConv, global_add_pool
 
 class PPGNN(nn.Module):
     """Predator–Prey GNN with semi-implicit diffusion (Jacobi)."""
+
     def __init__(
         self,
         in_channels: int,
         hidden: int,
         num_classes: int,
         layers: int = 15,
-        dt: float = 0.1,               # 固定步长
-        dropout: float = 0.3,          # 轻微 dropout，避免弱信号被抑制
-        norm_type: str = "sym",        # 'sym' or 'rw'
-        jacobi_steps: int = 2,         # Jacobi 近似步数
-        use_x_only: bool = True,       # 只用 X 通道读出
-        y0_mode: str = "ones",         # Y 初值
+        dt: float = 0.1,  # 固定步长
+        dropout: float = 0.3,  # 轻微 dropout，避免弱信号被抑制
+        norm_type: str = "sym",  # 'sym' or 'rw'
+        jacobi_steps: int = 2,  # Jacobi 近似步数
+        use_x_only: bool = True,  # 只用 X 通道读出
+        y0_mode: str = "ones",  # Y 初值
         alpha0: float = 0.2,
         beta0: float = 0.1,
         dx0: float = 0.15,
         dy0: float = 0.8,
+        level: str = "node",
     ):
         super().__init__()
         self.hidden = hidden
         self.dropout = dropout
         self.use_x_only = use_x_only
         self.y0_mode = y0_mode
+        self.graph_head = level == "graph"
 
         # 两套 lift
         self.lift_x = nn.Linear(in_channels, hidden)
         self.lift_y = nn.Linear(in_channels, hidden)
 
         # PP 层堆叠
-        self.layers = nn.ModuleList([
-            LVConv(
-                channels=hidden,
-                dt=dt,
-                norm_type=norm_type,
-                jacobi_steps=jacobi_steps,
-                alpha0=alpha0,
-                beta0=beta0,
-                dx0=dx0,
-                dy0=dy0,
-            )
-            for _ in range(layers)
-        ])
+        self.layers = nn.ModuleList(
+            [
+                LVConv(
+                    channels=hidden,
+                    dt=dt,
+                    norm_type=norm_type,
+                    jacobi_steps=jacobi_steps,
+                    alpha0=alpha0,
+                    beta0=beta0,
+                    dx0=dx0,
+                    dy0=dy0,
+                )
+                for _ in range(layers)
+            ]
+        )
 
         # 残差门控 τ
-        self.taus = nn.ParameterList([nn.Parameter(torch.tensor(0.7)) for _ in range(layers)])
+        self.taus = nn.ParameterList(
+            [nn.Parameter(torch.tensor(0.7)) for _ in range(layers)]
+        )
 
-        # 读出
+        # 节点级输出头
         out_dim = hidden if use_x_only else 2 * hidden
-        self.readout = nn.Linear(out_dim, num_classes)
+        self.lin_out = nn.Linear(out_dim, num_classes)
+
+        # 图级读出头
+        self.readout = (
+            nn.Sequential(
+                nn.Linear(out_dim, out_dim),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(out_dim, num_classes),
+            )
+            if self.graph_head
+            else None
+        )
         self.logit_scale = nn.Parameter(torch.tensor(2.5))
 
     def forward(self, data):
@@ -74,27 +93,44 @@ class PPGNN(nn.Module):
             tau = torch.sigmoid(tau_param)
             h = (1 - tau) * h + tau * h_hat
 
+        if self.graph_head and hasattr(data, "batch") and self.readout is not None:
+            if self.use_x_only:
+                X, _ = torch.split(h, self.hidden, dim=-1)
+                g = global_add_pool(X, data.batch)
+            else:
+                g = global_add_pool(h, data.batch)
+            g = F.dropout(g, p=0.1, training=self.training)
+            return self.readout(self.logit_scale * g)
+
         if self.use_x_only:
             X, _ = torch.split(h, self.hidden, dim=-1)
             X = F.dropout(X, p=0.1, training=self.training)
-            return self.readout(self.logit_scale * X)
-        else:
-            h = F.dropout(h, p=0.1, training=self.training)
-            return self.readout(self.logit_scale * h)
+            return self.lin_out(self.logit_scale * X)
+        h = F.dropout(h, p=0.1, training=self.training)
+        return self.lin_out(self.logit_scale * h)
 
 
 # ---------- 改进后的 Baseline GCN ----------
 class GCN(nn.Module):
     """
     安全策略：
-    - 默认 graph_head=False（不做图级读出），避免节点回归误触发池化。
-    - 仅当 graph_head=True 且 batch 存在时，才做 global_add_pool -> MLP。
+    - 默认只输出节点级表示，避免误触发图级池化。
+    - 当 level="graph" 且 batch 存在时，执行 global_add_pool -> MLP。
     - 始终保留 lin_out，便于在节点任务或未触发读出时直接返回节点级输出。
     """
-    def __init__(self, in_channels, hidden, num_classes, layers=5, dropout=0.2, graph_head: bool = False):
+
+    def __init__(
+        self,
+        in_channels,
+        hidden,
+        num_classes,
+        layers=5,
+        dropout=0.2,
+        level: str = "node",
+    ):
         super().__init__()
         self.dropout = dropout
-        self.graph_head = bool(graph_head)
+        self.graph_head = level == "graph"
 
         self.convs = nn.ModuleList()
         self.bns = nn.ModuleList()
@@ -107,16 +143,20 @@ class GCN(nn.Module):
             self.convs.append(GCNConv(hidden, hidden))
             self.bns.append(nn.BatchNorm1d(hidden))
 
-        # 节点级输出头：无论如何都保留（节点任务必须用得到）
+        # 节点级输出头：无论如何都保留
         self.lin_out = nn.Linear(hidden, num_classes)
 
         # 图级读出头：仅在需要时使用（图任务）
-        self.readout = nn.Sequential(
-            nn.Linear(hidden, hidden),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden, 1),
-        ) if self.graph_head else None
+        self.readout = (
+            nn.Sequential(
+                nn.Linear(hidden, hidden),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(hidden, num_classes),
+            )
+            if self.graph_head
+            else None
+        )
 
     def forward(self, data):
         x = data.x.float()
@@ -139,38 +179,95 @@ class GCN(nn.Module):
 
 
 class GraphSAGE(nn.Module):
-    def __init__(self, in_channels, hidden, num_classes, layers=2, dropout=0.5):
+    def __init__(
+        self,
+        in_channels,
+        hidden,
+        num_classes,
+        layers=2,
+        dropout=0.5,
+        level: str = "node",
+    ):
         super().__init__()
         self.dropout = dropout
+        self.graph_head = level == "graph"
+
         self.convs = nn.ModuleList()
         self.convs.append(SAGEConv(in_channels, hidden))
-        for _ in range(layers - 2):
+        for _ in range(layers - 1):
             self.convs.append(SAGEConv(hidden, hidden))
-        self.convs.append(SAGEConv(hidden, num_classes))
 
-    def forward(self, data):
-        x = data.x.float()
-        for conv in self.convs[:-1]:
-            x = conv(x, data.edge_index).relu()
-            x = F.dropout(x, p=self.dropout, training=self.training)
-        return self.convs[-1](x, data.edge_index)
+        # 节点级输出头
+        self.lin_out = nn.Linear(hidden, num_classes)
 
-
-class GAT(nn.Module):
-    def __init__(self, in_channels, hidden, num_classes, heads=8, layers=2, dropout=0.5):
-        super().__init__()
-        self.dropout = dropout
-        self.convs = nn.ModuleList()
-        self.convs.append(GATConv(in_channels, hidden, heads=heads))
-        for _ in range(layers - 2):
-            self.convs.append(GATConv(hidden * heads, hidden, heads=heads))
-        self.convs.append(
-            GATConv(hidden * heads, num_classes, heads=1, concat=False)
+        # 图级读出头
+        self.readout = (
+            nn.Sequential(
+                nn.Linear(hidden, hidden),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(hidden, num_classes),
+            )
+            if self.graph_head
+            else None
         )
 
     def forward(self, data):
         x = data.x.float()
-        for conv in self.convs[:-1]:
-            x = conv(x, data.edge_index).relu()
+        edge_index = data.edge_index
+        for conv in self.convs:
+            x = conv(x, edge_index).relu()
             x = F.dropout(x, p=self.dropout, training=self.training)
-        return self.convs[-1](x, data.edge_index)
+
+        if self.graph_head and hasattr(data, "batch") and self.readout is not None:
+            g = global_add_pool(x, data.batch)
+            return self.readout(g)
+        return self.lin_out(x)
+
+
+class GAT(nn.Module):
+    def __init__(
+        self,
+        in_channels,
+        hidden,
+        num_classes,
+        heads=8,
+        layers=2,
+        dropout=0.5,
+        level: str = "node",
+    ):
+        super().__init__()
+        self.dropout = dropout
+        self.graph_head = level == "graph"
+
+        self.convs = nn.ModuleList()
+        self.convs.append(GATConv(in_channels, hidden, heads=heads))
+        for _ in range(layers - 1):
+            self.convs.append(GATConv(hidden * heads, hidden, heads=heads))
+
+        # 节点级输出头
+        self.lin_out = nn.Linear(hidden * heads, num_classes)
+
+        # 图级读出头
+        self.readout = (
+            nn.Sequential(
+                nn.Linear(hidden * heads, hidden),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(hidden, num_classes),
+            )
+            if self.graph_head
+            else None
+        )
+
+    def forward(self, data):
+        x = data.x.float()
+        edge_index = data.edge_index
+        for conv in self.convs:
+            x = conv(x, edge_index).relu()
+            x = F.dropout(x, p=self.dropout, training=self.training)
+
+        if self.graph_head and hasattr(data, "batch") and self.readout is not None:
+            g = global_add_pool(x, data.batch)
+            return self.readout(g)
+        return self.lin_out(x)
