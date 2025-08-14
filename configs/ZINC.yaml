@@ -1,7 +1,7 @@
 {
   "ppgnn": {
     "model": {
-      "hidden": 64,
+      "hidden": 128,
       "layers": 3,
       "dt": 0.1,
       "dropout": 0.5,
@@ -24,12 +24,12 @@
   "gcn": {
     "model": {
       "hidden": 128,
-      "layers": 3,
-      "dropout": 0.5
+      "layers": 5,
+      "dropout": 0.1
     },
     "train": {
       "epochs": 100,
-      "lr": 0.01,
+      "lr": 0.001,
       "weight_decay": 0.0
     }
   },

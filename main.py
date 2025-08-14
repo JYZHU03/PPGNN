@@ -34,7 +34,7 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # ---------------------------------------------------------------------------
 
 def get_model(
-    name: str, in_channels: int, out_channels: int, cfg: Dict[str, Any] | None = None
+    name: str, in_channels: int, out_channels: int, cfg: Dict[str, Any], graph_head: str | None = None
 ):
     """Create a model by name with hyper-parameters from *cfg*."""
     cfg = cfg or {}
@@ -55,7 +55,7 @@ def get_model(
             dy0=cfg.get("dy0", 0.8),
         )
     if name == "gcn":
-        return GCN(**params, layers=cfg.get("layers", 2), dropout=cfg.get("dropout", 0.5))
+        return GCN(**params, layers=cfg.get("layers", 2), dropout=cfg.get("dropout", 0.5), graph_head=graph_head)
     if name == "sage":
         return GraphSAGE(**params, layers=cfg.get("layers", 2), dropout=cfg.get("dropout", 0.5))
     if name == "gat":
@@ -94,13 +94,13 @@ def main(argv: Iterable[str] | None = None):
     parser.add_argument(
         "--dataset",
         nargs="+",
-        default=["Cora"], # e.g. "Cora", "CiteSeer", "PubMed", "Cornell", "Texas", "Wisconsin", "ZINC", "MNIST", "ogbn-arxiv", "tr20_teTexas"
+        default=["ZINC"], # e.g. "Cora", "CiteSeer", "PubMed", "Cornell", "Texas", "Wisconsin", "ZINC", "MNIST", "ogbn-arxiv", "tr20_teTexas"
         help="Dataset(s) to evaluate",
     )
     parser.add_argument(
         "--models",
         nargs="+",
-        default=["ppgnn", "gcn", "sage", "gat"],  # e.g. "ppgnn", "gcn", "sage", "gat"
+        default=["gcn", "sage", "gat"],  # e.g. "ppgnn", "gcn", "sage", "gat"
         help="Models to train",
     )
     parser.add_argument("--epochs", type=int, default=None, help="Override training epochs")
@@ -122,6 +122,7 @@ def main(argv: Iterable[str] | None = None):
                 info["in_channels"],
                 info["out_channels"],
                 model_cfg.get("model"),
+                info["level"],
             )
             trainer = TRAINERS[(info["level"], info["task"])]
             train_cfg = model_cfg.get("train", {})

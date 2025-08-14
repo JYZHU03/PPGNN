@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from lvconv import LVConv
-from torch_geometric.nn import GCNConv, GATConv, SAGEConv
+from torch_geometric.nn import GCNConv, GATConv, SAGEConv, global_add_pool
 
 
 class PPGNN(nn.Module):
@@ -15,12 +15,12 @@ class PPGNN(nn.Module):
         hidden: int,
         num_classes: int,
         layers: int = 15,
-        dt: float = 0.1,               # 固定步长（你这组更稳）
-        dropout: float = 0.3,          # 降一点，避免把弱信号掉没
+        dt: float = 0.1,               # 固定步长
+        dropout: float = 0.3,          # 轻微 dropout，避免弱信号被抑制
         norm_type: str = "sym",        # 'sym' or 'rw'
-        jacobi_steps: int = 2,         # 回到 2 步（和你 0.79 那组一致）
+        jacobi_steps: int = 2,         # Jacobi 近似步数
         use_x_only: bool = True,       # 只用 X 通道读出
-        y0_mode: str = "ones",         # Y 初值先用常数 1，训练更稳
+        y0_mode: str = "ones",         # Y 初值
         alpha0: float = 0.2,
         beta0: float = 0.1,
         dx0: float = 0.15,
@@ -32,11 +32,11 @@ class PPGNN(nn.Module):
         self.use_x_only = use_x_only
         self.y0_mode = y0_mode
 
-        # 两套 lift（用 tanh，训练更顺滑）
+        # 两套 lift
         self.lift_x = nn.Linear(in_channels, hidden)
         self.lift_y = nn.Linear(in_channels, hidden)
 
-        # PP 层堆叠（固定 dt）
+        # PP 层堆叠
         self.layers = nn.ModuleList([
             LVConv(
                 channels=hidden,
@@ -51,16 +51,15 @@ class PPGNN(nn.Module):
             for _ in range(layers)
         ])
 
-        # 每层一个残差门控 τ（初值稍大，鼓励更新）
+        # 残差门控 τ
         self.taus = nn.ParameterList([nn.Parameter(torch.tensor(0.7)) for _ in range(layers)])
 
-        # 读出（线性 + 温度缩放 + 轻微 dropout）
+        # 读出
         out_dim = hidden if use_x_only else 2 * hidden
         self.readout = nn.Linear(out_dim, num_classes)
-        self.logit_scale = nn.Parameter(torch.tensor(2.5))  # 温度参数：拉低“温”软最大
+        self.logit_scale = nn.Parameter(torch.tensor(2.5))
 
     def forward(self, data):
-        # lift：改回 tanh（避免 ReLU 大面积卡零，把 LV 乘法项打没）
         X0 = torch.tanh(self.lift_x(data.x.float()))
         if self.y0_mode == "learned":
             Y0 = torch.tanh(self.lift_y(data.x.float()))
@@ -71,11 +70,10 @@ class PPGNN(nn.Module):
 
         for conv, tau_param in zip(self.layers, self.taus):
             h = F.dropout(h, p=self.dropout, training=self.training)
-            h_hat = conv(h, data.edge_index)      # 半隐式一步（Jacobi 近似）
-            tau = torch.sigmoid(tau_param)        # 保证在 (0,1)
-            h = (1 - tau) * h + tau * h_hat       # 残差门控
+            h_hat = conv(h, data.edge_index)
+            tau = torch.sigmoid(tau_param)
+            h = (1 - tau) * h + tau * h_hat
 
-        # 读出：只用 X + 轻微 dropout + 温度缩放
         if self.use_x_only:
             X, _ = torch.split(h, self.hidden, dim=-1)
             X = F.dropout(X, p=0.1, training=self.training)
@@ -85,23 +83,59 @@ class PPGNN(nn.Module):
             return self.readout(self.logit_scale * h)
 
 
-# ---------- Baseline GNNs（保持不变） ----------
+# ---------- 改进后的 Baseline GCN ----------
 class GCN(nn.Module):
-    def __init__(self, in_channels, hidden, num_classes, layers=2, dropout=0.5):
+    """
+    安全策略：
+    - 默认 graph_head=False（不做图级读出），避免节点回归误触发池化。
+    - 仅当 graph_head=True 且 batch 存在时，才做 global_add_pool -> MLP。
+    - 始终保留 lin_out，便于在节点任务或未触发读出时直接返回节点级输出。
+    """
+    def __init__(self, in_channels, hidden, num_classes, layers=5, dropout=0.2, graph_head: bool = False):
         super().__init__()
         self.dropout = dropout
+        self.graph_head = bool(graph_head)
+
         self.convs = nn.ModuleList()
+        self.bns = nn.ModuleList()
+
+        # 第 1 层
         self.convs.append(GCNConv(in_channels, hidden))
-        for _ in range(layers - 2):
+        self.bns.append(nn.BatchNorm1d(hidden))
+        # 后续层
+        for _ in range(layers - 1):
             self.convs.append(GCNConv(hidden, hidden))
-        self.convs.append(GCNConv(hidden, num_classes))
+            self.bns.append(nn.BatchNorm1d(hidden))
+
+        # 节点级输出头：无论如何都保留（节点任务必须用得到）
+        self.lin_out = nn.Linear(hidden, num_classes)
+
+        # 图级读出头：仅在需要时使用（图任务）
+        self.readout = nn.Sequential(
+            nn.Linear(hidden, hidden),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden, 1),
+        ) if self.graph_head else None
 
     def forward(self, data):
         x = data.x.float()
-        for conv in self.convs[:-1]:
-            x = conv(x, data.edge_index).relu()
+        edge_index = data.edge_index
+
+        for conv, bn in zip(self.convs, self.bns):
+            x = conv(x, edge_index)
+            x = bn(x)
+            x = F.relu(x)
             x = F.dropout(x, p=self.dropout, training=self.training)
-        return self.convs[-1](x, data.edge_index)
+
+        # 仅当明确开启图读出且 batch 存在时，做图级池化
+        if self.graph_head and hasattr(data, "batch") and self.readout is not None:
+            g = global_add_pool(x, data.batch)
+            return self.readout(g)
+
+        # 否则返回节点级输出（节点分类/回归；或把图级读出交给 tasks.py 的 _maybe_pool）
+        return self.lin_out(x)
+
 
 
 class GraphSAGE(nn.Module):

@@ -13,7 +13,7 @@ from typing import Dict, Iterable, Tuple, Callable
 import torch
 import torch.nn.functional as F
 from torch_geometric.loader import DataLoader
-from torch_geometric.nn import global_mean_pool
+from torch_geometric.nn import global_mean_pool, global_add_pool
 
 from utils import accuracy, mae
 
@@ -159,7 +159,7 @@ def train_node_regression(
         if val_mae < best_val:
             best_val, best_test, best_epoch = val_mae, test_mae, epoch
 
-        if epoch == 1 or epoch % 20 == 0 or epoch == epochs:
+        if epoch == 1 or epoch % 1 == 0 or epoch == epochs:
             print(
                 f"Epoch: {epoch:03d}  train_mae:{train_mae:.3f}  val_mae:{val_mae:.3f}  test_mae:{test_mae:.3f}"
             )
@@ -176,6 +176,13 @@ def train_node_regression(
 # ---------------------------------------------------------------------------
 # Graph-level tasks
 # ---------------------------------------------------------------------------
+
+def _maybe_pool(out, batch, pool_fn=global_add_pool):
+    # 若 out 是节点级表示（长度等于图中总节点数），再做 pool
+    if hasattr(batch, "batch") and out.size(0) == batch.batch.numel():
+        return pool_fn(out, batch.batch)
+    return out  # 已是图级表示则原样返回
+
 
 def train_graph_classification(
     loaders: Dict[str, DataLoader],
@@ -194,7 +201,7 @@ def train_graph_classification(
             for batch in loader:
                 batch = batch.to(DEVICE)
                 out = model(batch)
-                out = global_mean_pool(out, batch.batch)
+                out = _maybe_pool(out, batch)  # ✅ 统一使用也可避免二次 pooling
                 loss = F.cross_entropy(out, batch.y)
                 total_loss += loss.item() * batch.num_graphs
                 correct += (out.argmax(dim=-1) == batch.y).sum().item()
@@ -208,7 +215,7 @@ def train_graph_classification(
             batch = batch.to(DEVICE)
             optim.zero_grad()
             out = model(batch)
-            out = global_mean_pool(out, batch.batch)
+            out = _maybe_pool(out, batch)  # ✅ 与上面一致
             loss = F.cross_entropy(out, batch.y)
             loss.backward()
             if clip_value is not None:
@@ -235,14 +242,14 @@ def train_graph_classification(
         if val_acc > best_val:
             best_val, best_test, best_epoch = val_acc, test_acc, epoch
 
-        if epoch == 1 or epoch % 20 == 0 or epoch == epochs:
+        if epoch == 1 or epoch % 1 == 0 or epoch == epochs:
             print(
                 f"Epoch: {epoch:03d}  train_loss:{train_loss:.3f}  val_loss:{val_loss:.3f}  test_loss:{test_loss:.3f}  "
                 f"train_acc:{train_acc:.3f}  val_acc:{val_acc:.3f}  test_acc:{test_acc:.3f}"
             )
 
     print(
-        f"★  Best epoch in evaluation split: Epoch={best_epoch}  val_acc={best_val:.3f}  corresponding test_acc={best_test:.3f}"
+        f"★  Best epoch in evaluation split: Epoch={best_epoch}  val_acc:{best_val:.3f}  corresponding test_acc:{best_test:.3f}"
     )
     if mlflow is not None:
         mlflow.log_metrics(
@@ -260,19 +267,18 @@ def train_graph_regression(
     model = model.to(DEVICE)
     epochs, optim, clip_value = _setup_optim(model, model_name, train_cfg, default_epochs)
 
-    def evaluate(loader: DataLoader) -> float:
+    def evaluate(loader):
         model.eval()
-        preds, trues = [], []
+        loss_sum, n = 0.0, 0
         with torch.no_grad():
             for batch in loader:
                 batch = batch.to(DEVICE)
                 out = model(batch)
-                out = global_mean_pool(out, batch.batch)
-                preds.append(out.detach())
-                trues.append(batch.y.view_as(out).detach())
-        pred = torch.cat(preds, dim=0)
-        true = torch.cat(trues, dim=0)
-        return mae(pred, true)
+                out = _maybe_pool(out, batch)              # ✅ 若是节点级输出则做 pool
+                y = batch.y.view(-1, 1).to(out.dtype)      # ✅ 显式形状
+                loss_sum += F.l1_loss(out, y, reduction="sum").item()
+                n += y.size(0)
+        return loss_sum / n
 
     best_val = float("inf")
     best_test = float("inf")
@@ -283,8 +289,9 @@ def train_graph_regression(
             batch = batch.to(DEVICE)
             optim.zero_grad()
             out = model(batch)
-            out = global_mean_pool(out, batch.batch)
-            loss = F.l1_loss(out, batch.y.view_as(out))
+            out = _maybe_pool(out, batch)                  # ✅ 若是节点级输出则做 pool
+            y = batch.y.view(-1, 1).to(out.dtype)          # ✅ 显式形状
+            loss = F.l1_loss(out, y)
             loss.backward()
             if clip_value is not None:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), clip_value)
@@ -305,13 +312,13 @@ def train_graph_regression(
         if val_mae < best_val:
             best_val, best_test, best_epoch = val_mae, test_mae, epoch
 
-        if epoch == 1 or epoch % 20 == 0 or epoch == epochs:
+        if epoch == 1 or epoch % 1 == 0 or epoch == epochs:
             print(
                 f"Epoch: {epoch:03d}  train_mae:{train_mae:.4f}  val_mae:{val_mae:.4f}  test_mae:{test_mae:.4f}"
             )
 
     print(
-        f"★  Best epoch in evaluation split: Epoch={best_epoch}  val_mae={best_val:.4f}  corresponding test_mae={best_test:.4f}"
+        f"★  Best epoch in evaluation split: Epoch={best_epoch}  val_mae:{best_val:.4f}  corresponding test_mae:{best_test:.4f}"
     )
     if mlflow is not None:
         mlflow.log_metrics(
