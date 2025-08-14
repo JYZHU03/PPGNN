@@ -25,7 +25,8 @@
     "model": {
       "hidden": 64,
       "layers": 2,
-      "dropout": 0.4
+      "dropout": 0.4,
+      "norm": "BatchNorm1d"
     },
     "train": {
       "epochs": 300,
@@ -37,7 +38,8 @@
     "model": {
       "hidden": 64,
       "layers": 2,
-      "dropout": 0.4
+      "dropout": 0.4,
+      "norm": "None"
     },
     "train": {
       "epochs": 300,
@@ -50,7 +52,8 @@
       "hidden": 8,
       "heads": 8,
       "layers": 2,
-      "dropout": 0.4
+      "dropout": 0.4,
+      "norm": "None"
     },
     "train": {
       "epochs": 300,

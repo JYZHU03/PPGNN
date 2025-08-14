@@ -126,6 +126,7 @@ class GCN(nn.Module):
         num_classes,
         layers=5,
         dropout=0.2,
+        norm: str = "BatchNorm1d",
         level: str = "node",
     ):
         super().__init__()
@@ -133,15 +134,24 @@ class GCN(nn.Module):
         self.graph_head = level == "graph"
 
         self.convs = nn.ModuleList()
-        self.bns = nn.ModuleList()
+        self.norms = nn.ModuleList()
+
+        norm = (norm or "none").lower()
+
+        def make_norm():
+            if norm == "batchnorm1d" or norm == "batchnorm":
+                return nn.BatchNorm1d(hidden)
+            if norm == "layernorm" or norm == "ln":
+                return nn.LayerNorm(hidden)
+            return nn.Identity()
 
         # 第 1 层
         self.convs.append(GCNConv(in_channels, hidden))
-        self.bns.append(nn.BatchNorm1d(hidden))
+        self.norms.append(make_norm())
         # 后续层
         for _ in range(layers - 1):
             self.convs.append(GCNConv(hidden, hidden))
-            self.bns.append(nn.BatchNorm1d(hidden))
+            self.norms.append(make_norm())
 
         # 节点级输出头：无论如何都保留
         self.lin_out = nn.Linear(hidden, num_classes)
@@ -162,9 +172,9 @@ class GCN(nn.Module):
         x = data.x.float()
         edge_index = data.edge_index
 
-        for conv, bn in zip(self.convs, self.bns):
+        for conv, norm in zip(self.convs, self.norms):
             x = conv(x, edge_index)
-            x = bn(x)
+            x = norm(x)
             x = F.relu(x)
             x = F.dropout(x, p=self.dropout, training=self.training)
 
@@ -186,6 +196,7 @@ class GraphSAGE(nn.Module):
         num_classes,
         layers=2,
         dropout=0.5,
+        norm: str = "None",
         level: str = "node",
     ):
         super().__init__()
@@ -193,9 +204,22 @@ class GraphSAGE(nn.Module):
         self.graph_head = level == "graph"
 
         self.convs = nn.ModuleList()
+        self.norms = nn.ModuleList()
+
+        norm = (norm or "none").lower()
+
+        def make_norm():
+            if norm == "batchnorm1d" or norm == "batchnorm":
+                return nn.BatchNorm1d(hidden)
+            if norm == "layernorm" or norm == "ln":
+                return nn.LayerNorm(hidden)
+            return nn.Identity()
+
         self.convs.append(SAGEConv(in_channels, hidden))
+        self.norms.append(make_norm())
         for _ in range(layers - 1):
             self.convs.append(SAGEConv(hidden, hidden))
+            self.norms.append(make_norm())
 
         # 节点级输出头
         self.lin_out = nn.Linear(hidden, num_classes)
@@ -215,8 +239,10 @@ class GraphSAGE(nn.Module):
     def forward(self, data):
         x = data.x.float()
         edge_index = data.edge_index
-        for conv in self.convs:
-            x = conv(x, edge_index).relu()
+        for conv, norm in zip(self.convs, self.norms):
+            x = conv(x, edge_index)
+            x = norm(x)
+            x = F.relu(x)
             x = F.dropout(x, p=self.dropout, training=self.training)
 
         if self.graph_head and hasattr(data, "batch") and self.readout is not None:
@@ -234,6 +260,7 @@ class GAT(nn.Module):
         heads=8,
         layers=2,
         dropout=0.5,
+        norm: str = "None",
         level: str = "node",
     ):
         super().__init__()
@@ -241,9 +268,22 @@ class GAT(nn.Module):
         self.graph_head = level == "graph"
 
         self.convs = nn.ModuleList()
+        self.norms = nn.ModuleList()
+
+        norm = (norm or "none").lower()
+
+        def make_norm():
+            if norm == "batchnorm1d" or norm == "batchnorm":
+                return nn.BatchNorm1d(hidden * heads)
+            if norm == "layernorm" or norm == "ln":
+                return nn.LayerNorm(hidden * heads)
+            return nn.Identity()
+
         self.convs.append(GATConv(in_channels, hidden, heads=heads))
+        self.norms.append(make_norm())
         for _ in range(layers - 1):
             self.convs.append(GATConv(hidden * heads, hidden, heads=heads))
+            self.norms.append(make_norm())
 
         # 节点级输出头
         self.lin_out = nn.Linear(hidden * heads, num_classes)
@@ -263,8 +303,10 @@ class GAT(nn.Module):
     def forward(self, data):
         x = data.x.float()
         edge_index = data.edge_index
-        for conv in self.convs:
-            x = conv(x, edge_index).relu()
+        for conv, norm in zip(self.convs, self.norms):
+            x = conv(x, edge_index)
+            x = norm(x)
+            x = F.relu(x)
             x = F.dropout(x, p=self.dropout, training=self.training)
 
         if self.graph_head and hasattr(data, "batch") and self.readout is not None:

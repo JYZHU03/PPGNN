@@ -26,19 +26,21 @@
     "model": {
       "hidden": 128,
       "layers": 2,
-      "dropout": 0.4
+      "dropout": 0.4,
+      "norm": "BatchNorm1d"
     },
     "train": {
       "epochs": 350,
       "lr": 0.01,
       "weight_decay": 0.0005
     }
- },
+  },
   "sage": {
     "model": {
       "hidden": 128,
       "layers": 2,
-      "dropout": 0.5
+      "dropout": 0.5,
+      "norm": "None"
     },
     "train": {
       "epochs": 300,
@@ -51,7 +53,8 @@
       "hidden": 16,
       "heads": 8,
       "layers": 2,
-      "dropout": 0.5
+      "dropout": 0.5,
+      "norm": "None"
     },
     "train": {
       "epochs": 300,
@@ -60,4 +63,3 @@
     }
   }
 }
-

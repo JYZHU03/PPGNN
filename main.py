@@ -64,12 +64,14 @@ def get_model(
             **params,
             layers=cfg.get("layers", 2),
             dropout=cfg.get("dropout", 0.5),
+            norm=cfg.get("norm", "BatchNorm1d"),
         )
     if name == "sage":
         return GraphSAGE(
             **params,
             layers=cfg.get("layers", 2),
             dropout=cfg.get("dropout", 0.5),
+            norm=cfg.get("norm", "None"),
         )
     if name == "gat":
         return GAT(
@@ -77,6 +79,7 @@ def get_model(
             heads=cfg.get("heads", 8),
             layers=cfg.get("layers", 2),
             dropout=cfg.get("dropout", 0.5),
+            norm=cfg.get("norm", "None"),
         )
     raise ValueError(name)
 
@@ -107,13 +110,13 @@ def main(argv: Iterable[str] | None = None):
     parser.add_argument(
         "--dataset",
         nargs="+",
-        default=["Cora"], # e.g. "Cora", "CiteSeer", "PubMed", "Cornell", "Texas", "Wisconsin", "ZINC", "MNIST", "ogbn-arxiv", "tr20_teTexas"
+        default=["ZINC"], # e.g. "Cora", "CiteSeer", "PubMed", "Cornell", "Texas", "Wisconsin", "ZINC", "MNIST", "ogbn-arxiv", "tr20_teTexas"
         help="Dataset(s) to evaluate",
     )
     parser.add_argument(
         "--models",
         nargs="+",
-        default=["ppgnn","gcn", "sage", "gat"],  # e.g. "ppgnn", "gcn", "sage", "gat"
+        default=["gcn", "sage", "gat"],  # e.g. "ppgnn", "gcn", "sage", "gat"
         help="Models to train",
     )
     parser.add_argument("--epochs", type=int, default=None, help="Override training epochs")
