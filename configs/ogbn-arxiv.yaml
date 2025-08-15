@@ -2,7 +2,7 @@
   "ppgnn": {
     "model": {
       "hidden": 128,
-      "layers": 15,
+      "layers": 10,
       "dt": 0.1,
       "dropout": 0.4,
       "norm_type": "sym",
@@ -13,7 +13,7 @@
       "beta0": 0.1,
       "dx0": 0.7,
       "dy0": 0.8,
-      "norm": "layernorm"
+      "norm": "none"
     },
     "train": {
       "epochs": 710,
@@ -27,7 +27,7 @@
       "hidden": 128,
       "layers": 2,
       "dropout": 0.4,
-      "norm": "layernorm"
+      "norm": "none"
     },
     "train": {
       "epochs": 600,
@@ -40,7 +40,7 @@
       "hidden": 128,
       "layers": 2,
       "dropout": 0.4,
-      "norm": "layernorm"
+      "norm": "none"
     },
     "train": {
       "epochs": 600,
@@ -54,7 +54,7 @@
       "heads": 8,
       "layers": 2,
       "dropout": 0.4,
-      "norm": "layernorm"
+      "norm": "none"
     },
     "train": {
       "epochs": 600,

@@ -2,22 +2,22 @@
   "ppgnn": {
     "model": {
       "hidden": 128,
-      "layers": 8,
+      "layers": 10,
       "dt": 0.06,
       "dropout": 0.5,
       "norm_type": "sym",
       "jacobi_steps": 2,
-      "use_x_only": true,
-      "y0_mode": "ones",
+      "use_x_only": false,
+      "y0_mode": "learned",
       "alpha0": 0.2,
       "beta0": 0.1,
       "dx0": 0.7,
       "dy0": 0.8,
-      "norm": "layernorm"
+      "norm": "none"
     },
     "train": {
-      "epochs": 500,
-      "lr": 0.002,
+      "epochs": 600,
+      "lr": 0.01,
       "weight_decay": 0.0005,
       "clip_value": 5.0
     }
@@ -27,7 +27,7 @@
       "hidden": 128,
       "layers": 2,
       "dropout": 0.5,
-      "norm": "layernorm"
+      "norm": "none"
     },
     "train": {
       "epochs": 500,
@@ -40,7 +40,7 @@
       "hidden": 128,
       "layers": 2,
       "dropout": 0.5,
-      "norm": "layernorm"
+      "norm": "none"
     },
     "train": {
       "epochs": 600,
@@ -54,7 +54,7 @@
       "heads": 8,
       "layers": 2,
       "dropout": 0.5,
-      "norm": "layernorm"
+      "norm": "none"
     },
     "train": {
       "epochs": 600,

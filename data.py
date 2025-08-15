@@ -155,4 +155,38 @@ def load_dataset(name: str) -> Dict:
             data=batch,
         )
 
+    if name == "tr20_te100":
+        dataset = preformat_Powergrid(
+            "data/PowerGrid",
+            train_dataset="dataset20",
+            test_dataset="dataset100",
+        )
+        data_list = [dataset[i] for i in range(len(dataset))]
+        batch = Batch.from_data_list(data_list).to(DEVICE)
+        train_idx, val_idx, test_idx = dataset.split_idxs
+        train_mask = torch.zeros(batch.num_nodes, dtype=torch.bool)
+        val_mask = torch.zeros(batch.num_nodes, dtype=torch.bool)
+        test_mask = torch.zeros(batch.num_nodes, dtype=torch.bool)
+        ptr = 0
+        for i, d in enumerate(data_list):
+            n = d.num_nodes
+            if i in train_idx:
+                train_mask[ptr:ptr + n] = True
+            elif i in val_idx:
+                val_mask[ptr:ptr + n] = True
+            else:
+                test_mask[ptr:ptr + n] = True
+            ptr += n
+        batch.train_mask = train_mask
+        batch.val_mask = val_mask
+        batch.test_mask = test_mask
+        out_dim = batch.y.size(-1) if batch.y.ndim > 1 else 1
+        return dict(
+            level="node",
+            task="regression",
+            in_channels=batch.num_features,
+            out_channels=out_dim,
+            data=batch,
+        )
+
     raise ValueError(f"Unknown dataset: {name}")

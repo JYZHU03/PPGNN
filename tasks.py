@@ -15,7 +15,7 @@ import torch.nn.functional as F
 from torch_geometric.loader import DataLoader
 from torch_geometric.nn import global_mean_pool, global_add_pool
 
-from utils import accuracy, mae
+from utils import accuracy, mae, r2
 
 try:  # Optional MLflow dependency
     import mlflow  # type: ignore
@@ -42,7 +42,8 @@ def _setup_optim(
         lr=train_cfg.get("lr", 2e-3 if model_name == "ppgnn" else 1e-2),
         weight_decay=train_cfg.get("weight_decay", 5e-4),
     )
-    clip_value = train_cfg.get("clip_value", 5.0 if model_name == "ppgnn" else None)
+    # clip_value = train_cfg.get("clip_value", 5.0 if model_name == "ppgnn" else None)
+    clip_value =  None
     return epochs, optim, clip_value
 
 
@@ -123,6 +124,8 @@ def train_node_regression(
 
     best_val = float("inf")
     best_test = float("inf")
+    best_val_r2 = -float("inf")
+    best_test_r2 = -float("inf")
     best_epoch = 0
     for epoch in range(1, epochs + 1):
         model.train()
@@ -142,9 +145,18 @@ def train_node_regression(
         model.eval()
         with torch.no_grad():
             pred = model(data)
-            train_mae = mae(pred[train_mask], data.y[train_mask].view_as(pred[train_mask]))
-            val_mae = mae(pred[val_mask], data.y[val_mask].view_as(pred[val_mask]))
-            test_mae = mae(pred[test_mask], data.y[test_mask].view_as(pred[test_mask]))
+            train_preds = pred[train_mask]
+            val_preds = pred[val_mask]
+            test_preds = pred[test_mask]
+            train_targets = data.y[train_mask].view_as(train_preds)
+            val_targets = data.y[val_mask].view_as(val_preds)
+            test_targets = data.y[test_mask].view_as(test_preds)
+            train_mae = mae(train_preds, train_targets)
+            val_mae = mae(val_preds, val_targets)
+            test_mae = mae(test_preds, test_targets)
+            train_r2 = r2(train_preds, train_targets)
+            val_r2 = r2(val_preds, val_targets)
+            test_r2 = r2(test_preds, test_targets)
 
         if mlflow is not None:
             mlflow.log_metrics(
@@ -152,25 +164,38 @@ def train_node_regression(
                     "train_mae": train_mae,
                     "val_mae": val_mae,
                     "test_mae": test_mae,
+                    "train_r2": train_r2,
+                    "val_r2": val_r2,
+                    "test_r2": test_r2,
                 },
                 step=epoch,
             )
 
         if val_mae < best_val:
-            best_val, best_test, best_epoch = val_mae, test_mae, epoch
+            best_val, best_test = val_mae, test_mae
+            best_val_r2, best_test_r2 = val_r2, test_r2
+            best_epoch = epoch
 
         if epoch == 1 or epoch % 1 == 0 or epoch == epochs:
             print(
-                f"Epoch: {epoch:03d}  train_mae:{train_mae:.3f}  val_mae:{val_mae:.3f}  test_mae:{test_mae:.3f}"
+                f"Epoch: {epoch:03d}  train_mae:{train_mae:.3f}  val_mae:{val_mae:.3f}  test_mae:{test_mae:.3f}  "
+                f"train_r2:{train_r2:.3f}  val_r2:{val_r2:.3f}  test_r2:{test_r2:.3f}"
             )
 
     print(
-        f"★  Best epoch in evaluation split: Epoch={best_epoch}  val_mae={best_val:.3f}  corresponding test_mae={best_test:.3f}"
+        f"★  Best epoch in evaluation split: Epoch={best_epoch}  val_mae={best_val:.3f}  val_r2={best_val_r2:.3f}  corresponding test_mae={best_test:.3f}  test_r2={best_test_r2:.3f}"
     )
     if mlflow is not None:
         mlflow.log_metrics(
-            {"best_val_mae": best_val, "best_test_mae": best_test}, step=best_epoch
+            {
+                "best_val_mae": best_val,
+                "best_test_mae": best_test,
+                "best_val_r2": best_val_r2,
+                "best_test_r2": best_test_r2,
+            },
+            step=best_epoch,
         )
+
 
 
 # ---------------------------------------------------------------------------
@@ -270,6 +295,8 @@ def train_graph_regression(
     def evaluate(loader):
         model.eval()
         loss_sum, n = 0.0, 0
+        preds = []
+        targets = []
         with torch.no_grad():
             for batch in loader:
                 batch = batch.to(DEVICE)
@@ -278,10 +305,16 @@ def train_graph_regression(
                 y = batch.y.view(-1, 1).to(out.dtype)      # ✅ 显式形状
                 loss_sum += F.l1_loss(out, y, reduction="sum").item()
                 n += y.size(0)
-        return loss_sum / n
+                preds.append(out.cpu())
+                targets.append(y.cpu())
+        preds = torch.cat(preds, dim=0)
+        targets = torch.cat(targets, dim=0)
+        return loss_sum / n, r2(preds, targets)
 
     best_val = float("inf")
     best_test = float("inf")
+    best_val_r2 = -float("inf")
+    best_test_r2 = -float("inf")
     best_epoch = 0
     for epoch in range(1, epochs + 1):
         model.train()
@@ -297,34 +330,45 @@ def train_graph_regression(
                 torch.nn.utils.clip_grad_norm_(model.parameters(), clip_value)
             optim.step()
 
-        train_mae = evaluate(loaders["train"])
-        val_mae = evaluate(loaders["val"])
-        test_mae = evaluate(loaders["test"])
+        train_mae, train_r2 = evaluate(loaders["train"])
+        val_mae, val_r2 = evaluate(loaders["val"])
+        test_mae, test_r2 = evaluate(loaders["test"])
         if mlflow is not None:
             mlflow.log_metrics(
                 {
                     "train_mae": train_mae,
                     "val_mae": val_mae,
                     "test_mae": test_mae,
+                    "train_r2": train_r2,
+                    "val_r2": val_r2,
+                    "test_r2": test_r2,
                 },
                 step=epoch,
             )
         if val_mae < best_val:
-            best_val, best_test, best_epoch = val_mae, test_mae, epoch
+            best_val, best_test = val_mae, test_mae
+            best_val_r2, best_test_r2 = val_r2, test_r2
+            best_epoch = epoch
 
         if epoch == 1 or epoch % 1 == 0 or epoch == epochs:
             print(
-                f"Epoch: {epoch:03d}  train_mae:{train_mae:.4f}  val_mae:{val_mae:.4f}  test_mae:{test_mae:.4f}"
+                f"Epoch: {epoch:03d}  train_mae:{train_mae:.4f}  val_mae:{val_mae:.4f}  test_mae:{test_mae:.4f}  "
+                f"train_r2:{train_r2:.4f}  val_r2:{val_r2:.4f}  test_r2:{test_r2:.4f}"
             )
 
     print(
-        f"★  Best epoch in evaluation split: Epoch={best_epoch}  val_mae:{best_val:.4f}  corresponding test_mae:{best_test:.4f}"
+        f"★  Best epoch in evaluation split: Epoch={best_epoch}  val_mae:{best_val:.4f}  val_r2:{best_val_r2:.4f}  corresponding test_mae:{best_test:.4f}  test_r2:{best_test_r2:.4f}"
     )
     if mlflow is not None:
         mlflow.log_metrics(
-            {"best_val_mae": best_val, "best_test_mae": best_test}, step=best_epoch
+            {
+                "best_val_mae": best_val,
+                "best_test_mae": best_test,
+                "best_val_r2": best_val_r2,
+                "best_test_r2": best_test_r2,
+            },
+            step=best_epoch,
         )
-
 
 # ---------------------------------------------------------------------------
 # Trainer dispatch table

@@ -1,16 +1,16 @@
 {
   "dataset": {
     "format": "PowerGrid-size",
-    "name": "tr20_teTexas",
+    "name": "tr20_te100",
     "train_dataset": "dataset20",
-    "test_dataset": "Texas"
+    "test_dataset": "dataset100"
   },
   "ppgnn": {
     "model": {
       "hidden": 64,
       "layers": 10,
       "dt": 0.1,
-      "dropout": 0.4,
+      "dropout": 0.5,
       "norm_type": "sym",
       "jacobi_steps": 2,
       "use_x_only": true,
@@ -33,7 +33,7 @@
       "hidden": 64,
       "layers": 10,
       "dropout": 0.2,
-      "norm": "BatchNorm1d"
+      "norm": "layernorm"
     },
     "train": {
       "epochs": 300,
@@ -44,7 +44,7 @@
   "sage": {
     "model": {
       "hidden": 64,
-      "layers": 10,
+      "layers": 2,
       "dropout": 0.4,
       "norm": "layernorm"
     },
@@ -56,9 +56,9 @@
   },
   "gat": {
     "model": {
-      "hidden": 64,
-      "heads": 4,
-      "layers": 10,
+      "hidden": 8,
+      "heads": 8,
+      "layers": 2,
       "dropout": 0.4,
       "norm": "layernorm"
     },
