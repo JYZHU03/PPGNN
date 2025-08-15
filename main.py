@@ -153,6 +153,14 @@ def main(argv: Iterable[str] | None = None):
             train_cfg.setdefault("epochs", args.epochs)
             model_cfg["train"] = train_cfg
 
+            # Print resolved configuration for transparency
+            print("Model parameters:")
+            for k, v in model_params.items():
+                print(f"  {k}: {v}")
+            print("Training parameters:")
+            for k, v in train_cfg.items():
+                print(f"  {k}: {v}")
+
             model = get_model(
                 model_name,
                 info["in_channels"],
