@@ -36,14 +36,16 @@ def propagate_gat(x: torch.Tensor, edge_index: torch.Tensor, layers: int) -> tor
     """Repeatedly apply a GAT layer with identity weights and uniform attention."""
     conv = GATConv(1, 1, heads=1, concat=False, bias=False)
     with torch.no_grad():
-        if hasattr(conv, "lin_src"):
+        if getattr(conv, "lin_src", None) is not None:
             conv.lin_src.weight.data = torch.eye(1)
             conv.lin_dst.weight.data = torch.eye(1)
         else:  # fallback for older PyG versions
             conv.lin.weight.data = torch.eye(1)
-        if hasattr(conv, "att_src"):
+        if getattr(conv, "att_src", None) is not None:
             conv.att_src.data.fill_(0.0)
             conv.att_dst.data.fill_(0.0)
+        elif getattr(conv, "att", None) is not None:
+            conv.att.data.fill_(0.0)
     for _ in range(layers):
         x = conv(x, edge_index)
     return x
