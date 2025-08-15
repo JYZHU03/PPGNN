@@ -113,7 +113,7 @@ def main(argv: Iterable[str] | None = None):
     parser.add_argument(
         "--dataset",
         nargs="+",
-        default=["ZINC"], # e.g. "Cora", "CiteSeer", "PubMed", "Cornell", "Texas", "Wisconsin", "ZINC", "MNIST", "ogbn-arxiv", "tr20_teTexas", "tr20_te100"
+        default=["Cora"], # e.g. "Cora", "CiteSeer", "PubMed", "Cornell", "Texas", "Wisconsin", "ZINC", "MNIST", "ogbn-arxiv", "tr20_teTexas", "tr20_te100"
         help="Dataset(s) to evaluate",
     )
     parser.add_argument(
@@ -122,7 +122,12 @@ def main(argv: Iterable[str] | None = None):
         default=["ppgnn","gcn", "sage", "gat"],  # e.g. "ppgnn", "gcn", "sage", "gat"
         help="Models to train",
     )
-    parser.add_argument("--epochs", type=int, default=None, help="Override training epochs")
+    parser.add_argument("--hidden", type=int, default=128, help="Hidden dimension")
+    parser.add_argument("--layers", type=int, default=5, help="Number of layers")
+    parser.add_argument("--dropout", type=float, default=0.2, help="Dropout rate")
+    parser.add_argument("--lr", type=float, default=0.001, help="Learning rate")
+    parser.add_argument("--weight_decay", type=float, default=0.0005, help="Weight decay")
+    parser.add_argument("--epochs", type=int, default=300, help="Training epochs")
     parser.add_argument("--config-dir", type=str, default="configs", help="Configuration directory")
     args = parser.parse_args(argv)
 
@@ -136,15 +141,26 @@ def main(argv: Iterable[str] | None = None):
         for model_name in args.models:
             print(f"\n--- {model_name.upper()} ---")
             model_cfg = cfg.get(model_name, {})
+            model_params = model_cfg.get("model", {})
+            model_params.setdefault("hidden", args.hidden)
+            model_params.setdefault("layers", args.layers)
+            model_params.setdefault("dropout", args.dropout)
+            model_cfg["model"] = model_params
+
+            train_cfg = model_cfg.get("train", {})
+            train_cfg.setdefault("lr", args.lr)
+            train_cfg.setdefault("weight_decay", args.weight_decay)
+            train_cfg.setdefault("epochs", args.epochs)
+            model_cfg["train"] = train_cfg
+
             model = get_model(
                 model_name,
                 info["in_channels"],
                 info["out_channels"],
-                model_cfg.get("model"),
+                model_params,
                 info["level"],
             )
             trainer = TRAINERS[(info["level"], info["task"])]
-            train_cfg = model_cfg.get("train", {})
             data_or_loader = info.get("data") or info.get("loaders")
 
             if mlflow is not None:
@@ -152,13 +168,13 @@ def main(argv: Iterable[str] | None = None):
                 with mlflow.start_run(run_name=model_name):
                     mlflow.log_param("dataset", dataset_name)
                     mlflow.log_param("model", model_name)
-                    for k, v in model_cfg.get("model", {}).items():
+                    for k, v in model_params.items():
                         mlflow.log_param(f"model_{k}", v)
                     for k, v in train_cfg.items():
                         mlflow.log_param(f"train_{k}", v)
-                    trainer(data_or_loader, model, model_name, train_cfg, args.epochs)
+                    trainer(data_or_loader, model, model_name, train_cfg, None)
             else:
-                trainer(data_or_loader, model, model_name, train_cfg, args.epochs)
+                trainer(data_or_loader, model, model_name, train_cfg, None)
 
 if __name__ == "__main__":
     main()
