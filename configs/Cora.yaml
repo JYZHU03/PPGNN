@@ -14,7 +14,7 @@
       "dx0": 0.7,
       "dy0": 0.8,
       "norm": "BatchNorm1d",
-      "lift_type": "mlp",
+      "lift_type": "linear",
       "lift_layers": 2
     },
     "train": {

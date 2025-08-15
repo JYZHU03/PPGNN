@@ -13,7 +13,9 @@
       "beta0": 0.1,
       "dx0": 0.7,
       "dy0": 0.8,
-      "norm": "none"
+      "norm": "none",
+      "lift_type": "linear",
+      "lift_layers": 2
     },
     "train": {
       "epochs": 600,
