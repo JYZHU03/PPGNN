@@ -119,7 +119,7 @@ def main(argv: Iterable[str] | None = None):
     parser.add_argument(
         "--dataset",
         nargs="+",
-        default=["Computers"], # e.g. "Cora", "CiteSeer", "PubMed", "CS", "Computers", "Photo", "ogbn-arxiv", "Cornell", "Texas", "Wisconsin", "ZINC", "MNIST", "tr20_teTexas", "tr20_te100",
+        default=["Peptides-struct"], # e.g. "Cora", "CiteSeer", "PubMed", "CS", "Computers", "Photo", "ogbn-arxiv", "Cornell", "Texas", "Wisconsin", "ZINC", "MNIST", "tr20_teTexas", "tr20_te100", "PascalVOC-SP", "COCO-SP", "Peptides-func", "Peptides-struct", "PCQM-Contact",
         help="Dataset(s) to evaluate",
     )
     parser.add_argument(

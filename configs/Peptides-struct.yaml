@@ -1,0 +1,67 @@
+{
+  "ppgnn": {
+    "model": {
+      "hidden": 128,
+      "layers": 10,
+      "dt": 0.06,
+      "dropout": 0.1,
+      "norm_type": "sym",
+      "jacobi_steps": 2,
+      "use_x_only": true,
+      "y0_mode": "learned",
+      "alpha0": 0.2,
+      "beta0": 0.1,
+      "dx0": 0.7,
+      "dy0": 0.8,
+      "norm": "BatchNorm1d",
+      "lift_type": "mlp",
+      "lift_layers": 2
+    },
+    "train": {
+      "epochs": 100,
+      "lr": 0.001,
+      "weight_decay": 0.0,
+      "clip_value": 2.0
+    }
+  },
+  "gcn": {
+    "model": {
+      "hidden": 128,
+      "layers": 5,
+      "dropout": 0.1,
+      "norm": "BatchNorm1d"
+    },
+    "train": {
+      "epochs": 100,
+      "lr": 0.001,
+      "weight_decay": 0.0
+    }
+  },
+  "sage": {
+    "model": {
+      "hidden": 128,
+      "layers": 3,
+      "dropout": 0.5,
+      "norm": "BatchNorm1d"
+    },
+    "train": {
+      "epochs": 100,
+      "lr": 0.01,
+      "weight_decay": 0.0
+    }
+  },
+  "gat": {
+    "model": {
+      "hidden": 8,
+      "heads": 8,
+      "layers": 3,
+      "dropout": 0.5,
+      "norm": "BatchNorm1d"
+    },
+    "train": {
+      "epochs": 100,
+      "lr": 0.005,
+      "weight_decay": 0.0
+    }
+  }
+}

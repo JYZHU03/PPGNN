@@ -19,6 +19,7 @@ from torch_geometric.datasets import (
     MNISTSuperpixels,
     Amazon,
     Coauthor,
+    LRGBDataset,
 )
 from torch_geometric.loader import DataLoader
 from torch_geometric.transforms import (
@@ -37,6 +38,7 @@ PLANETOID = {"Cora", "CiteSeer", "PubMed"}
 WEBKB = {"Cornell", "Texas", "Wisconsin"}
 AMAZON = {"Computers", "Photo"}
 COAUTHOR = {"CS"}
+LRGB = {"PascalVOC-SP", "COCO-SP", "Peptides-func", "Peptides-struct", "PCQM-Contact"}
 
 
 def load_dataset(name: str) -> Dict:
@@ -111,6 +113,28 @@ def load_dataset(name: str) -> Dict:
             in_channels=dataset.num_features,
             out_channels=dataset.num_classes,
             data=data,
+        )
+
+    if name in LRGB:
+        train_ds = LRGBDataset(root="data/LRGB", name=name, split="train")
+        val_ds = LRGBDataset(root="data/LRGB", name=name, split="val")
+        test_ds = LRGBDataset(root="data/LRGB", name=name, split="test")
+        loaders = {
+            "train": DataLoader(train_ds, batch_size=64, shuffle=True),
+            "val": DataLoader(val_ds, batch_size=128),
+            "test": DataLoader(test_ds, batch_size=128),
+        }
+        in_dim = train_ds.num_features
+        out_dim = getattr(train_ds, "num_classes", None)
+        if out_dim is None:
+            out_dim = train_ds[0].y.size(-1)
+        task_type = "regression" if name == "Peptides-struct" else "classification"
+        return dict(
+            level="graph",
+            task=task_type,
+            in_channels=in_dim,
+            out_channels=out_dim,
+            loaders=loaders,
         )
 
 
