@@ -28,6 +28,12 @@ from tasks import TRAINERS
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+# Default hyper-parameters used when neither CLI arguments nor YAML specify a
+# value. These mirror the previous ``argparse`` defaults to maintain backwards
+# compatibility.
+MODEL_DEFAULTS = {"hidden": 128, "layers": 5, "dropout": 0.2}
+TRAIN_DEFAULTS = {"lr": 0.001, "weight_decay": 0.0005, "epochs": 300}
+
 
 # ---------------------------------------------------------------------------
 # Model factory
@@ -122,12 +128,15 @@ def main(argv: Iterable[str] | None = None):
         default=["ppgnn","gcn", "sage", "gat"],  # e.g. "ppgnn", "gcn", "sage", "gat"
         help="Models to train",
     )
-    parser.add_argument("--hidden", type=int, default=128, help="Hidden dimension")
-    parser.add_argument("--layers", type=int, default=5, help="Number of layers")
-    parser.add_argument("--dropout", type=float, default=0.2, help="Dropout rate")
-    parser.add_argument("--lr", type=float, default=0.001, help="Learning rate")
-    parser.add_argument("--weight_decay", type=float, default=0.0005, help="Weight decay")
-    parser.add_argument("--epochs", type=int, default=300, help="Training epochs")
+    # Hyper-parameters are optional on the command line. If omitted, values from
+    # the dataset configuration file are used and, if still unspecified, fall
+    # back to ``MODEL_DEFAULTS``/``TRAIN_DEFAULTS`` defined above.
+    parser.add_argument("--hidden", type=int, default=None, help="Hidden dimension")
+    parser.add_argument("--layers", type=int, default=None, help="Number of layers")
+    parser.add_argument("--dropout", type=float, default=None, help="Dropout rate")
+    parser.add_argument("--lr", type=float, default=None, help="Learning rate")
+    parser.add_argument("--weight_decay", type=float, default=None, help="Weight decay")
+    parser.add_argument("--epochs", type=int, default=None, help="Training epochs")
     parser.add_argument("--config-dir", type=str, default="configs", help="Configuration directory")
     args = parser.parse_args(argv)
 
@@ -142,15 +151,21 @@ def main(argv: Iterable[str] | None = None):
             print(f"\n--- {model_name.upper()} ---")
             model_cfg = cfg.get(model_name, {})
             model_params = model_cfg.get("model", {})
-            model_params.setdefault("hidden", args.hidden)
-            model_params.setdefault("layers", args.layers)
-            model_params.setdefault("dropout", args.dropout)
+            for key, default in MODEL_DEFAULTS.items():
+                arg_val = getattr(args, key)
+                if arg_val is not None:
+                    model_params[key] = arg_val
+                else:
+                    model_params.setdefault(key, default)
             model_cfg["model"] = model_params
 
             train_cfg = model_cfg.get("train", {})
-            train_cfg.setdefault("lr", args.lr)
-            train_cfg.setdefault("weight_decay", args.weight_decay)
-            train_cfg.setdefault("epochs", args.epochs)
+            for key, default in TRAIN_DEFAULTS.items():
+                arg_val = getattr(args, key)
+                if arg_val is not None:
+                    train_cfg[key] = arg_val
+                else:
+                    train_cfg.setdefault(key, default)
             model_cfg["train"] = train_cfg
 
             # Print resolved configuration for transparency
