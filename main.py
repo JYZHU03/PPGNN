@@ -59,6 +59,8 @@ def get_model(
             dx0=cfg.get("dx0", 0.7),
             dy0=cfg.get("dy0", 0.8),
             norm=cfg.get("norm", "BatchNorm1d"),
+            lift_type=cfg.get("lift_type", "linear"),
+            lift_layers=cfg.get("lift_layers", 2),
         )
     if name == "gcn":
         return GCN(
@@ -111,7 +113,7 @@ def main(argv: Iterable[str] | None = None):
     parser.add_argument(
         "--dataset",
         nargs="+",
-        default=["ZINC"], # e.g. "Cora", "CiteSeer", "PubMed", "Cornell", "Texas", "Wisconsin", "ZINC", "MNIST", "ogbn-arxiv", "tr20_teTexas", "tr20_te100"
+        default=["Texas"], # e.g. "Cora", "CiteSeer", "PubMed", "Cornell", "Texas", "Wisconsin", "ZINC", "MNIST", "ogbn-arxiv", "tr20_teTexas", "tr20_te100"
         help="Dataset(s) to evaluate",
     )
     parser.add_argument(

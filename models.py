@@ -28,6 +28,8 @@ class PPGNN(nn.Module):
         dy0: float = 0.8,
         norm: str = "BatchNorm1d",
         level: str = "node",
+        lift_type: str = "linear",  # 'linear' or 'mlp'
+        lift_layers: int = 2,  # 仅在使用 MLP 时生效
     ):
         super().__init__()
         self.hidden = hidden
@@ -36,9 +38,20 @@ class PPGNN(nn.Module):
         self.y0_mode = y0_mode
         self.graph_head = level == "graph"
 
+        lift_type = (lift_type or "linear").lower()
+
+        def build_lift():
+            if lift_type == "mlp" and lift_layers > 1:
+                mlp = [nn.Linear(in_channels, hidden), nn.ReLU()]
+                for _ in range(lift_layers - 2):
+                    mlp.extend([nn.Linear(hidden, hidden), nn.ReLU()])
+                mlp.append(nn.Linear(hidden, hidden))
+                return nn.Sequential(*mlp)
+            return nn.Linear(in_channels, hidden)
+
         # 两套 lift
-        self.lift_x = nn.Linear(in_channels, hidden)
-        self.lift_y = nn.Linear(in_channels, hidden)
+        self.lift_x = build_lift()
+        self.lift_y = build_lift()
 
         # PP 层堆叠
         self.layers = nn.ModuleList(

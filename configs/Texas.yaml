@@ -13,7 +13,9 @@
       "beta0": 0.1,
       "dx0": 0.1,
       "dy0": 0.8,
-      "norm": "BatchNorm1d"
+      "norm": "none",
+      "lift_type": "mlp",
+      "lift_layers": 3
     },
     "train": {
       "epochs": 300,
