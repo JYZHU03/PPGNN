@@ -119,13 +119,13 @@ def main(argv: Iterable[str] | None = None):
     parser.add_argument(
         "--dataset",
         nargs="+",
-        default=["Cora"], # e.g. "Cora", "CiteSeer", "PubMed", "Cornell", "Texas", "Wisconsin", "ZINC", "MNIST", "ogbn-arxiv", "tr20_teTexas", "tr20_te100"
+        default=["Computers"], # e.g. "Cora", "CiteSeer", "PubMed", "CS", "Computers", "Photo", "ogbn-arxiv", "Cornell", "Texas", "Wisconsin", "ZINC", "MNIST", "tr20_teTexas", "tr20_te100",
         help="Dataset(s) to evaluate",
     )
     parser.add_argument(
         "--models",
         nargs="+",
-        default=["ppgnn","gcn", "sage", "gat"],  # e.g. "ppgnn", "gcn", "sage", "gat"
+        default=["ppgnn", "gcn", "sage", "gat"],  # e.g. "ppgnn", "gcn", "sage", "gat"
         help="Models to train",
     )
     # Hyper-parameters are optional on the command line. If omitted, values from

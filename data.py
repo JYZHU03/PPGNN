@@ -12,9 +12,21 @@ loaders.
 from typing import Dict
 
 import torch
-from torch_geometric.datasets import Planetoid, WebKB, ZINC, MNISTSuperpixels
+from torch_geometric.datasets import (
+    Planetoid,
+    WebKB,
+    ZINC,
+    MNISTSuperpixels,
+    Amazon,
+    Coauthor,
+)
 from torch_geometric.loader import DataLoader
-from torch_geometric.transforms import Compose, NormalizeFeatures, ToUndirected
+from torch_geometric.transforms import (
+    Compose,
+    NormalizeFeatures,
+    ToUndirected,
+    RandomNodeSplit,
+)
 from torch_geometric.data import Batch
 from power_grid_data import preformat_Powergrid
 
@@ -23,6 +35,8 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 PLANETOID = {"Cora", "CiteSeer", "PubMed"}
 WEBKB = {"Cornell", "Texas", "Wisconsin"}
+AMAZON = {"Computers", "Photo"}
+COAUTHOR = {"CS"}
 
 
 def load_dataset(name: str) -> Dict:
@@ -64,6 +78,41 @@ def load_dataset(name: str) -> Dict:
             out_channels=dataset.num_classes,
             data=data,
         )
+
+    if name in AMAZON:
+        dataset = Amazon(
+            root="data/Amazon",
+            name=name,
+            transform=Compose(
+                [NormalizeFeatures(), ToUndirected(), RandomNodeSplit(num_val=0.1, num_test=0.2)]
+            ),
+        )
+        data = dataset[0].to(DEVICE)
+        return dict(
+            level="node",
+            task="classification",
+            in_channels=dataset.num_features,
+            out_channels=dataset.num_classes,
+            data=data,
+        )
+
+    if name in COAUTHOR:
+        dataset = Coauthor(
+            root="data/Coauthor",
+            name=name,
+            transform=Compose(
+                [NormalizeFeatures(), ToUndirected(), RandomNodeSplit(num_val=0.1, num_test=0.2)]
+            ),
+        )
+        data = dataset[0].to(DEVICE)
+        return dict(
+            level="node",
+            task="classification",
+            in_channels=dataset.num_features,
+            out_channels=dataset.num_classes,
+            data=data,
+        )
+
 
     if name == "ZINC":
         train_ds = ZINC(root="data/ZINC", split="train")

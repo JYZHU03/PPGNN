@@ -2,7 +2,7 @@
   "ppgnn": {
     "model": {
       "hidden": 128,
-      "layers": 2,
+      "layers": 5,
       "dt": 0.1,
       "dropout": 0.7,
       "norm_type": "sym",
@@ -15,10 +15,10 @@
       "dy0": 0.8,
       "norm": "none",
       "lift_type": "mlp",
-      "lift_layers": 2
+      "lift_layers": 1
     },
     "train": {
-      "epochs": 200,
+      "epochs": 2000,
       "lr": 0.05,
       "weight_decay": 0.0001,
       "clip_value": 5.0
