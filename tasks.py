@@ -302,7 +302,9 @@ def train_graph_regression(
                 batch = batch.to(DEVICE)
                 out = model(batch)
                 out = _maybe_pool(out, batch)              # ✅ 若是节点级输出则做 pool
-                y = batch.y.view(-1, 1).to(out.dtype)      # ✅ 显式形状
+                y = batch.y.to(out.dtype)
+                if y.dim() == 1:
+                    y = y.view(-1, 1)
                 loss_sum += F.l1_loss(out, y, reduction="sum").item()
                 n += y.size(0)
                 preds.append(out.cpu())
@@ -323,7 +325,9 @@ def train_graph_regression(
             optim.zero_grad()
             out = model(batch)
             out = _maybe_pool(out, batch)                  # ✅ 若是节点级输出则做 pool
-            y = batch.y.view(-1, 1).to(out.dtype)          # ✅ 显式形状
+            y = batch.y.to(out.dtype)
+            if y.dim() == 1:
+                y = y.view(-1, 1)
             loss = F.l1_loss(out, y)
             loss.backward()
             if clip_value is not None:

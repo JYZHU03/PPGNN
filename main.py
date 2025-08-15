@@ -125,7 +125,7 @@ def main(argv: Iterable[str] | None = None):
     parser.add_argument(
         "--models",
         nargs="+",
-        default=["ppgnn", "gcn", "sage", "gat"],  # e.g. "ppgnn", "gcn", "sage", "gat"
+        default=["gcn", "sage", "gat"],  # e.g. "ppgnn", "gcn", "sage", "gat"
         help="Models to train",
     )
     # Hyper-parameters are optional on the command line. If omitted, values from
