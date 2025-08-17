@@ -42,8 +42,8 @@ def _setup_optim(
         lr=train_cfg.get("lr", 2e-3 if model_name == "ppgnn" else 1e-2),
         weight_decay=train_cfg.get("weight_decay", 5e-4),
     )
-    # clip_value = train_cfg.get("clip_value", 5.0 if model_name == "ppgnn" else None)
-    clip_value =  None
+    clip_value = train_cfg.get("clip_value", 5.0 if model_name == "ppgnn" else None)
+    # clip_value =  None
     return epochs, optim, clip_value
 
 

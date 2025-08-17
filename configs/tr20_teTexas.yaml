@@ -27,7 +27,7 @@
       "epochs": 300,
       "lr": 0.01,
       "weight_decay": 0.0005,
-      "clip_value": 5.0
+      "clip_value":
     }
   },
   "gcn": {
@@ -40,7 +40,8 @@
     "train": {
       "epochs": 300,
       "lr": 0.01,
-      "weight_decay": 0.0005
+      "weight_decay": 0.0005,
+      "clip_value":
     }
   },
   "sage": {
@@ -53,7 +54,8 @@
     "train": {
       "epochs": 300,
       "lr": 0.01,
-      "weight_decay": 0.0005
+      "weight_decay": 0.0005,
+      "clip_value":
     }
   },
   "gat": {
@@ -67,7 +69,8 @@
     "train": {
       "epochs": 300,
       "lr": 0.01,
-      "weight_decay": 0.0005
+      "weight_decay": 0.0005,
+      "clip_value":
     }
   }
 }

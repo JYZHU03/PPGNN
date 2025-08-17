@@ -119,13 +119,13 @@ def main(argv: Iterable[str] | None = None):
     parser.add_argument(
         "--dataset",
         nargs="+",
-        default=["Peptides-struct"], # e.g. "Cora", "CiteSeer", "PubMed", "CS", "Computers", "Photo", "ogbn-arxiv", "Cornell", "Texas", "Wisconsin", "ZINC", "MNIST", "tr20_teTexas", "tr20_te100", "PascalVOC-SP", "COCO-SP", "Peptides-func", "Peptides-struct", "PCQM-Contact",
+        default=["Cora"], # e.g. "Cora", "CiteSeer", "PubMed", "CS", "Computers", "Photo", "ogbn-arxiv", "Cornell", "Texas", "Wisconsin", "ZINC", "MNIST", "tr20_teTexas", "tr20_te100", "PascalVOC-SP", "COCO-SP", "Peptides-func", "Peptides-struct", "PCQM-Contact",
         help="Dataset(s) to evaluate",
     )
     parser.add_argument(
         "--models",
         nargs="+",
-        default=["gcn", "sage", "gat"],  # e.g. "ppgnn", "gcn", "sage", "gat"
+        default=["ppgnn","gcn", "sage", "gat"],  # e.g. "ppgnn", "gcn", "sage", "gat"
         help="Models to train",
     )
     # Hyper-parameters are optional on the command line. If omitted, values from
