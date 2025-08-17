@@ -78,7 +78,7 @@ def propagate_ppgnn(x: torch.Tensor, edge_index: torch.Tensor, layers: int) -> t
 def main():
     torch.manual_seed(0)
     size = 20
-    layers = 100
+    layers = 20
 
     edge_index = grid_edge_index(size, size)
     x = torch.rand(size * size, 1)
@@ -90,23 +90,38 @@ def main():
 
     mats = {
         "Initial": data.x.view(size, size),
-        "GCN (100 layers)": x_gcn.view(size, size),
-        "GAT (100 layers)": x_gat.view(size, size),
-        "PPGNN (100 layers)": x_ppgnn.view(size, size),
+        "GCN (20 layers)": x_gcn.view(size, size),
+        "GAT (20 layers)": x_gat.view(size, size),
+        "PPGNN (20 layers)": x_ppgnn.view(size, size),
     }
 
     vmin = min(mat.min().item() for mat in mats.values())
     vmax = max(mat.max().item() for mat in mats.values())
 
+    # 主题样式可保留；关键是使用 constrained_layout 来自动为色标和标题留空间
     plt.style.use("seaborn-v0_8")
-    fig, axes = plt.subplots(1, 4, figsize=(12, 3), dpi=300)
+
+    # 使用 constrained_layout，避免 colorbar 挤到最后一幅图，并保证标题不被裁剪
+    fig, axes = plt.subplots(
+        1, 4, figsize=(12.8, 3.6), dpi=300, constrained_layout=True
+    )
+
+    # 绘图
+    last_im = None
     for ax, (title, mat) in zip(axes, mats.items()):
-        im = ax.imshow(mat, cmap="viridis", vmin=vmin, vmax=vmax)
-        ax.set_title(title, fontsize=10)
+        last_im = ax.imshow(
+            mat.detach().cpu().numpy(), cmap="viridis", vmin=vmin, vmax=vmax
+        )
+        # pad 增加标题与图像的距离，避免贴边裁剪
+        ax.set_title(title, fontsize=11, pad=6)
         ax.axis("off")
-    fig.colorbar(im, ax=axes, fraction=0.02, pad=0.04)
-    plt.tight_layout()
-    plt.savefig("oversmoothing_heatmaps.png", dpi=300)
+
+    # 将 colorbar 放在整排子图右侧；constrained_layout 会自动腾出空间
+    cbar = fig.colorbar(last_im, ax=axes, shrink=0.9, pad=0.02)
+    cbar.ax.tick_params(labelsize=8)
+
+    # 注意：不要再调用 tight_layout()，以免与 constrained_layout 冲突
+    fig.savefig("oversmoothing_heatmaps.png", dpi=300)
     plt.show()
 
 
