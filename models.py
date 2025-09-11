@@ -118,6 +118,7 @@ class PPGNN(nn.Module):
             tau = torch.sigmoid(tau_param)
             h = (1 - tau) * h + tau * h_hat
             h = norm(h)
+            # h = norm(h_hat)
 
         if self.graph_head and hasattr(data, "batch") and self.readout is not None:
             if self.use_x_only:
