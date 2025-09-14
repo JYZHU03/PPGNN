@@ -59,7 +59,6 @@ from torch_geometric.nn import (
     SGConv,
     TAGConv,
     TransformerConv,
-    global_add_pool,
 )
 from torch_geometric.nn.conv import MessagePassing
 from torch_geometric.datasets import (
@@ -143,6 +142,20 @@ def mean_edge_cosine(x: torch.Tensor, edge_index: torch.Tensor, sample: int = 20
     x = F.normalize(x, p=2, dim=-1)
     cos = (x[row] * x[col]).sum(dim=-1)
     return float(cos.mean().clamp(min=-1.0, max=1.0).item())
+
+
+def global_add_pool_safe(x: torch.Tensor, batch: torch.Tensor) -> torch.Tensor:
+    """Torch-only global add pooling avoiding optional torch_scatter.
+    Works on CPU/GPU, assuming `batch` is 0..B-1 with size equal to x.size(0).
+    """
+    if batch.numel() == 0:
+        return x.new_zeros((0, x.size(-1)))
+    if batch.dtype != torch.long:
+        batch = batch.long()
+    num_graphs = int(batch.max().item()) + 1
+    out = x.new_zeros((num_graphs, x.size(-1)))
+    out.index_add_(0, batch, x)
+    return out
 
 
 # =========================================================
@@ -518,9 +531,9 @@ class PPGNN(nn.Module):
         if self.graph_head and hasattr(data, "batch") and self.readout is not None:
             if self.use_x_only:
                 X, _ = torch.split(h, self.hidden, dim=-1)
-                g = global_add_pool(X, data.batch)
+                g = global_add_pool_safe(X, data.batch)
             else:
-                g = global_add_pool(h, data.batch)
+                g = global_add_pool_safe(h, data.batch)
             g = F.dropout(g, p=0.1, training=self.training)
             return self.readout(self.logit_scale * g)
 
@@ -818,7 +831,7 @@ def train_node_classification(data, model, model_name: str, train_cfg: Dict, def
         mlflow.log_metrics({"best_val": best_val, "best_test": best_test}, step=best_epoch)
 
 
-def _maybe_pool(out: torch.Tensor, batch: Batch, pool_fn=global_add_pool) -> torch.Tensor:
+def _maybe_pool(out: torch.Tensor, batch: Batch, pool_fn=global_add_pool_safe) -> torch.Tensor:
     """Pool node-level outputs to graph-level if a `batch` vector is present."""
     if hasattr(batch, "batch") and out.size(0) == batch.batch.numel():
         return pool_fn(out, batch.batch)
@@ -842,6 +855,15 @@ def train_graph_classification(loaders: Dict[str, DataLoader], model, model_name
             out = model(batch)
             out = _maybe_pool(out, batch)
             y = batch.y.view(-1).long()
+            # Early sanity check for label range to avoid CUDA device asserts
+            C = out.size(-1)
+            if y.numel() > 0:
+                y_min = int(y.min().item())
+                y_max = int(y.max().item())
+                if y_min < 0 or y_max >= C:
+                    raise RuntimeError(
+                        f"Label out of range: y in [{y_min},{y_max}] while logits dim={C}."
+                    )
             loss = F.cross_entropy(out, y)
             if train:
                 optim.zero_grad()
