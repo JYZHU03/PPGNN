@@ -882,7 +882,7 @@ def train_graph_classification(loaders: Dict[str, DataLoader], model, model_name
         if val_acc > best_val:
             best_val, best_test, best_epoch = float(val_acc), float(test_acc), epoch
 
-        if epoch == 1 or epoch % 10 == 0 or epoch == epochs:
+        if epoch == 1 or epoch % 1 == 0 or epoch == epochs:
             print(
                 f"Epoch {epoch:03d}  tr_loss:{train_loss:.3f}  va_loss:{val_loss:.3f}  te_loss:{test_loss:.3f}  "
                 f"tr_acc:{train_acc:.3f}  va_acc:{val_acc:.3f}  te_acc:{test_acc:.3f}"
