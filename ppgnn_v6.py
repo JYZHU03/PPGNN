@@ -818,7 +818,79 @@ def train_node_classification(data, model, model_name: str, train_cfg: Dict, def
         mlflow.log_metrics({"best_val": best_val, "best_test": best_test}, step=best_epoch)
 
 
-# Graph tasks not required for Cora/Texas; omitted for brevity.
+def _maybe_pool(out: torch.Tensor, batch: Batch, pool_fn=global_add_pool) -> torch.Tensor:
+    """Pool node-level outputs to graph-level if a `batch` vector is present."""
+    if hasattr(batch, "batch") and out.size(0) == batch.batch.numel():
+        return pool_fn(out, batch.batch)
+    return out
+
+
+def train_graph_classification(loaders: Dict[str, DataLoader], model, model_name: str, train_cfg: Dict, default_epochs: int | None) -> None:
+    model = model.to(DEVICE)
+    epochs, optim, clip_value = _setup_optim(model, model_name, train_cfg, default_epochs)
+
+    def _run(split: str, train: bool = False):
+        if train:
+            model.train()
+        else:
+            model.eval()
+        total_loss = 0.0
+        y_true = []
+        y_pred = []
+        for batch in loaders[split]:
+            batch = batch.to(DEVICE)
+            out = model(batch)
+            out = _maybe_pool(out, batch)
+            y = batch.y.view(-1).long()
+            loss = F.cross_entropy(out, y)
+            if train:
+                optim.zero_grad()
+                loss.backward()
+                if clip_value is not None:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), clip_value)
+                optim.step()
+            total_loss += float(loss.detach().item()) * y.numel()
+            y_true.append(y.detach().cpu())
+            y_pred.append(out.detach().cpu())
+        y_true = torch.cat(y_true, dim=0)
+        y_pred = torch.cat(y_pred, dim=0)
+        avg_loss = total_loss / max(1, y_true.numel())
+        acc = accuracy(y_pred, y_true)
+        return avg_loss, acc
+
+    best_val = best_test = 0.0
+    best_epoch = 0
+    for epoch in range(1, epochs + 1):
+        train_loss, train_acc = _run("train", train=True)
+        with torch.no_grad():
+            val_loss, val_acc = _run("val", train=False)
+            test_loss, test_acc = _run("test", train=False)
+
+        if mlflow is not None:
+            mlflow.log_metrics(
+                {
+                    "train_loss": float(train_loss),
+                    "val_loss": float(val_loss),
+                    "test_loss": float(test_loss),
+                    "train_acc": float(train_acc),
+                    "val_acc": float(val_acc),
+                    "test_acc": float(test_acc),
+                },
+                step=epoch,
+            )
+
+        if val_acc > best_val:
+            best_val, best_test, best_epoch = float(val_acc), float(test_acc), epoch
+
+        if epoch == 1 or epoch % 10 == 0 or epoch == epochs:
+            print(
+                f"Epoch {epoch:03d}  tr_loss:{train_loss:.3f}  va_loss:{val_loss:.3f}  te_loss:{test_loss:.3f}  "
+                f"tr_acc:{train_acc:.3f}  va_acc:{val_acc:.3f}  te_acc:{test_acc:.3f}"
+            )
+
+    print(f"★ Best@val: epoch={best_epoch}  val={best_val:.3f}  test@best_val={best_test:.3f}")
+    if mlflow is not None:
+        mlflow.log_metrics({"best_val": best_val, "best_test": best_test}, step=best_epoch)
 
 
 # =========================================================
@@ -945,7 +1017,14 @@ def main(argv: Iterable[str] | None = None):
             for k, v in train_cfg.items(): print(f"  {k}: {v}")
 
             model = get_model(model_name, info["in_channels"], info["out_channels"], model_params, info["level"])
-            trainer = train_node_classification  # Cora/Texas are node classification
+            # Choose trainer by task level
+            if info["level"] == "node":
+                trainer = train_node_classification
+            else:
+                if info["task"] == "classification":
+                    trainer = train_graph_classification
+                else:
+                    raise RuntimeError(f"No trainer for graph-{info['task']}")
             data_or_loader = info.get("data") or info.get("loaders")
 
             if mlflow is not None:
