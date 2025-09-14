@@ -22,7 +22,20 @@ except Exception:  # pragma: no cover - allow running without MLflow
 
 
 from utils import set_seed
-from models import PPGNN, GCN, GraphSAGE, GAT
+from models import (
+    PPGNN,
+    GCN,
+    GraphSAGE,
+    GAT,
+    TransformerNet,
+    TAGCNNet,
+    GraphConvNet,
+    ChebNet,
+    ARMAGNN,
+    SGCNet,
+    GINNet,
+    APPNPGNN,
+)
 from data import load_dataset
 from tasks import TRAINERS
 
@@ -67,6 +80,8 @@ def get_model(
             norm=cfg.get("norm", "BatchNorm1d"),
             lift_type=cfg.get("lift_type", "linear"),
             lift_layers=cfg.get("lift_layers", 2),
+            custom=cfg.get("custom", 0),
+            custom_gnn=cfg.get("custom_gnn", "gcn"),
         )
     if name == "gcn":
         return GCN(
@@ -86,6 +101,68 @@ def get_model(
         return GAT(
             **params,
             heads=cfg.get("heads", 8),
+            layers=cfg.get("layers", 2),
+            dropout=cfg.get("dropout", 0.5),
+            norm=cfg.get("norm", "None"),
+        )
+    if name == "transformer":
+        return TransformerNet(
+            **params,
+            heads=cfg.get("heads", 4),
+            layers=cfg.get("layers", 2),
+            dropout=cfg.get("dropout", 0.5),
+            norm=cfg.get("norm", "None"),
+        )
+    if name == "tagcn":
+        return TAGCNNet(
+            **params,
+            K=cfg.get("K", 3),
+            layers=cfg.get("layers", 2),
+            dropout=cfg.get("dropout", 0.5),
+            norm=cfg.get("norm", "None"),
+        )
+    if name == "graphconv":
+        return GraphConvNet(
+            **params,
+            layers=cfg.get("layers", 2),
+            dropout=cfg.get("dropout", 0.5),
+            norm=cfg.get("norm", "None"),
+        )
+    if name == "cheb":
+        return ChebNet(
+            **params,
+            K=cfg.get("K", 3),
+            layers=cfg.get("layers", 2),
+            dropout=cfg.get("dropout", 0.5),
+            norm=cfg.get("norm", "None"),
+        )
+    if name == "arma":
+        return ARMAGNN(
+            **params,
+            layers=cfg.get("layers", 2),
+            dropout=cfg.get("dropout", 0.5),
+            norm=cfg.get("norm", "None"),
+        )
+    if name == "sgc":
+        return SGCNet(
+            **params,
+            K=cfg.get("K", 1),
+            layers=cfg.get("layers", 2),
+            dropout=cfg.get("dropout", 0.5),
+            norm=cfg.get("norm", "None"),
+        )
+    if name == "gin":
+        return GINNet(
+            **params,
+            layers=cfg.get("layers", 2),
+            dropout=cfg.get("dropout", 0.5),
+            norm=cfg.get("norm", "None"),
+        )
+    if name == "appnp":
+        return APPNPGNN(
+            **params,
+            K=cfg.get("K", 10),
+            alpha=cfg.get("alpha", 0.1),
             layers=cfg.get("layers", 2),
             dropout=cfg.get("dropout", 0.5),
             norm=cfg.get("norm", "None"),
@@ -119,13 +196,26 @@ def main(argv: Iterable[str] | None = None):
     parser.add_argument(
         "--dataset",
         nargs="+",
-        default=["Cora"], # e.g. "Cora", "CiteSeer", "PubMed", "CS", "Computers", "Photo", "ogbn-arxiv", "Cornell", "Texas", "Wisconsin", "ZINC", "MNIST", "tr20_teTexas", "tr20_te100", "PascalVOC-SP", "COCO-SP", "Peptides-func", "Peptides-struct", "PCQM-Contact",
+        default=["Texas"], # e.g. "Cora", "CiteSeer", "PubMed", "CS", "Computers", "Photo", "ogbn-arxiv", "Cornell", "Texas", "Wisconsin", "ZINC", "MNIST", "tr20_teTexas", "tr20_te100", "PascalVOC-SP", "COCO-SP", "Peptides-func", "Peptides-struct", "PCQM-Contact",
         help="Dataset(s) to evaluate",
     )
     parser.add_argument(
         "--models",
         nargs="+",
-        default=["ppgnn","gcn", "sage", "gat"],  # e.g. "ppgnn", "gcn", "sage", "gat"
+        default=[
+            "ppgnn",
+            "gcn",
+            "sage",
+            "gat",
+            "transformer",
+            "tagcn",
+            "graphconv",
+            "cheb",
+            "arma",
+            "sgc",
+            "gin",
+            "appnp",
+        ],
         help="Models to train",
     )
     # Hyper-parameters are optional on the command line. If omitted, values from
@@ -138,6 +228,32 @@ def main(argv: Iterable[str] | None = None):
     parser.add_argument("--weight_decay", type=float, default=None, help="Weight decay")
     parser.add_argument("--epochs", type=int, default=None, help="Training epochs")
     parser.add_argument("--config-dir", type=str, default="configs", help="Configuration directory")
+    # Predator–Prey GNN customization: use PyG convs inside LVConv
+    parser.add_argument(
+        "--custom",
+        type=int,
+        default=1,
+        help="For PPGNN only: 1 to use a PyG GNN operator inside LVConv for the X-channel diffusion; 0 to keep original propagate",
+    )
+    parser.add_argument(
+        "--custom-gnn",
+        type=str,
+        default="sage",
+        choices=[
+            "gcn",
+            "sage",
+            "gat",
+            "transformer",
+            "tagcn",
+            "graphconv",
+            "cheb",
+            "arma",
+            "sgc",
+            "gin",
+            "appnp",
+        ],
+        help="For PPGNN only: which PyG GNN to use when --custom=1",
+    )
     args = parser.parse_args(argv)
 
     set_seed(0)
@@ -157,6 +273,11 @@ def main(argv: Iterable[str] | None = None):
                     model_params[key] = arg_val
                 else:
                     model_params.setdefault(key, default)
+            # Inject CLI overrides for PPGNN custom operator if provided
+            if args.custom is not None:
+                model_params["custom"] = int(args.custom)
+            if args.custom_gnn is not None:
+                model_params["custom_gnn"] = args.custom_gnn
             model_cfg["model"] = model_params
 
             train_cfg = model_cfg.get("train", {})

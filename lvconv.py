@@ -4,6 +4,19 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn.conv import MessagePassing
+from torch_geometric.nn import (
+    GCNConv,
+    GATConv,
+    TransformerConv,
+    TAGConv,
+    SAGEConv,
+    GraphConv,
+    ChebConv,
+    ARMAConv,
+    SGConv,
+    GINConv,
+    APPNP,
+)
 from torch_geometric.utils import degree
 
 
@@ -27,6 +40,8 @@ class LVConv(MessagePassing):
         beta0: float = 0.1,
         dx0: float = 0.7,
         dy0: float = 0.8,
+        custom: bool = False,
+        custom_gnn: str = "gcn",
     ):
         super().__init__(aggr="add")
         assert norm_type in {"sym", "rw"}
@@ -77,6 +92,51 @@ class LVConv(MessagePassing):
         #     self.Dx.fill_(softplus_inv(0.02))  # activator: very slow
         #     self.Dy.fill_(softplus_inv(0.60))  # inhibitor: much faster
 
+        # 自定义扩散算子（仅用于 X 通道）
+        self.use_custom = bool(custom)
+        self.custom_gnn = (custom_gnn or "gcn").lower()
+        if self.use_custom:
+            if self.custom_gnn == "gcn":
+                self.custom_conv_R = GCNConv(self.d, self.d)
+                self._custom_type = "conv"
+            elif self.custom_gnn == "sage":
+                self.custom_conv_R = SAGEConv(self.d, self.d)
+                self._custom_type = "conv"
+            elif self.custom_gnn == "gat":
+                self.custom_conv_R = GATConv(self.d, self.d, heads=1, concat=False)
+                self._custom_type = "conv"
+            elif self.custom_gnn == "transformer":
+                # concat=False 以保持维度 = out_channels
+                self.custom_conv_R = TransformerConv(self.d, self.d, heads=1, concat=False)
+                self._custom_type = "conv"
+            elif self.custom_gnn == "tagcn":
+                self.custom_conv_R = TAGConv(self.d, self.d, K=3)
+                self._custom_type = "conv"
+            elif self.custom_gnn == "graphconv":
+                self.custom_conv_R = GraphConv(self.d, self.d)
+                self._custom_type = "conv"
+            elif self.custom_gnn == "cheb":
+                self.custom_conv_R = ChebConv(self.d, self.d, K=3)
+                self._custom_type = "conv"
+            elif self.custom_gnn == "arma":
+                self.custom_conv_R = ARMAConv(self.d, self.d, num_stacks=1, num_layers=1, shared_weights=False)
+                self._custom_type = "conv"
+            elif self.custom_gnn == "sgc":
+                self.custom_conv_R = SGConv(self.d, self.d, K=1, cached=True)
+                self._custom_type = "conv"
+            elif self.custom_gnn == "gin":
+                mlp = nn.Sequential(nn.Linear(self.d, self.d), nn.ReLU(), nn.Linear(self.d, self.d))
+                self.custom_conv_R = GINConv(mlp)
+                self._custom_type = "conv"
+            elif self.custom_gnn == "appnp":
+                self.lin_R = nn.Linear(self.d, self.d)
+                self.appnp_R = APPNP(K=10, alpha=0.1)
+                self._custom_type = "appnp"
+            else:
+                raise ValueError(
+                    f"Unknown custom_gnn: {self.custom_gnn} (expected one of: gcn, sage, gat, transformer, tagcn, graphconv, cheb, arma, sgc, gin, appnp)"
+                )
+
     def forward(self, h: torch.Tensor, edge_index: torch.Tensor):
         """
         h : [N, 2d]  (concat of X | Y)
@@ -120,7 +180,14 @@ class LVConv(MessagePassing):
 
         Xk, Yk = X, Y
         for _ in range(self.jacobi_steps):
-            SXk = self.propagate(edge_index, x=Xk, norm=norm)
+            if getattr(self, "use_custom", False):
+                # 使用指定的 GNN 作为 X 通道扩散算子
+                if getattr(self, "_custom_type", "conv") == "appnp":
+                    SXk = self.appnp_R(self.lin_R(Xk), edge_index)
+                else:
+                    SXk = self.custom_conv_R(Xk, edge_index)
+            else:
+                SXk = self.propagate(edge_index, x=Xk, norm=norm)
             SYk = self.propagate(edge_index, x=Yk, norm=norm)
             Xk = (RHS_X + ax * SXk) / denom_x
             Yk = (RHS_Y + ay * SYk) / denom_y

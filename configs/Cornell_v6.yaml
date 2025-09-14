@@ -1,0 +1,34 @@
+ppgnn:
+  model:
+    hidden: 128
+    layers: 2
+    dt: 0.1
+    dropout: 0.86
+    norm_type: "rw"
+    jacobi_steps: 1
+    use_x_only: true
+    y0_mode: "learned"
+    alpha0: 0.2
+    beta0: 0.1
+    dx0: 0.05
+    dy0: 0.3
+    norm: "LayerNorm"
+    lift_type: "mlp"
+    lift_layers: 2
+    custom: 1
+    custom_gnn: "gcn"
+    heads: 1
+    # FA-LV（更强的异质驱动，放大 F 的平滑幅度与耦合）
+    fa_lv: 1
+    fa_power: 1.0
+    fa_alpha1: 1
+    fa_beta1: 1
+    fa_gamma1: 1
+    fa_delta1: 1
+    fa_dx1: 1
+    fa_dy1: 1
+  train:
+    epochs: 700
+    lr: 0.002
+    weight_decay: 0.0005
+    clip_value: 5.0

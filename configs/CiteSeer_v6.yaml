@@ -1,0 +1,34 @@
+ppgnn:
+  model:
+    hidden: 256
+    layers: 8
+    dt: 0.06
+    dropout: 0.5
+    norm_type: "sym"
+    jacobi_steps: 2
+    use_x_only: false
+    y0_mode: "learned"
+    alpha0: 0.2
+    beta0: 0.1
+    dx0: 0.7
+    dy0: 0.8
+    norm: "none"
+    lift_type: "linear"
+    lift_layers: 2
+    custom: 0
+    custom_gnn: "gcn"
+    heads: 1
+    # FA-LV
+    fa_lv: 1
+    fa_power: 1.0
+    fa_alpha1: 1
+    fa_beta1: 1
+    fa_gamma1: 1
+    fa_delta1: 1
+    fa_dx1: 1
+    fa_dy1: 1
+  train:
+    epochs: 600
+    lr: 0.002
+    weight_decay: 0.0005
+    clip_value: 5.0

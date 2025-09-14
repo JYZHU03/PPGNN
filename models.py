@@ -4,7 +4,20 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from lvconv import LVConv
-from torch_geometric.nn import GCNConv, GATConv, SAGEConv, global_add_pool
+from torch_geometric.nn import (
+    GCNConv,
+    GATConv,
+    SAGEConv,
+    GraphConv,
+    ChebConv,
+    ARMAConv,
+    SGConv,
+    GINConv,
+    APPNP,
+    TransformerConv,
+    TAGConv,
+    global_add_pool,
+)
 
 
 class PPGNN(nn.Module):
@@ -30,6 +43,8 @@ class PPGNN(nn.Module):
         level: str = "node",
         lift_type: str = "linear",  # 'linear' or 'mlp'
         lift_layers: int = 2,  # 仅在使用 MLP 时生效
+        custom: int | bool = 0,  # 1 使用具体GNN; 0 使用当前传播
+        custom_gnn: str = "gcn",  # gcn|gat|transformer|tagcn
     ):
         super().__init__()
         self.hidden = hidden
@@ -65,6 +80,8 @@ class PPGNN(nn.Module):
                     beta0=beta0,
                     dx0=dx0,
                     dy0=dy0,
+                    custom=bool(custom),
+                    custom_gnn=custom_gnn,
                 )
                 for _ in range(layers)
             ]
@@ -336,6 +353,472 @@ class GAT(nn.Module):
             x = F.relu(x)
             x = F.dropout(x, p=self.dropout, training=self.training)
 
+        if self.graph_head and hasattr(data, "batch") and self.readout is not None:
+            g = global_add_pool(x, data.batch)
+            return self.readout(g)
+        return self.lin_out(x)
+
+
+# ---------- TransformerConv-based GNN ----------
+class TransformerNet(nn.Module):
+    def __init__(
+        self,
+        in_channels,
+        hidden,
+        num_classes,
+        heads=4,
+        layers=2,
+        dropout=0.5,
+        norm: str = "None",
+        level: str = "node",
+    ):
+        super().__init__()
+        self.dropout = dropout
+        self.graph_head = level == "graph"
+
+        self.convs = nn.ModuleList()
+        self.norms = nn.ModuleList()
+
+        norm = (norm or "none").lower()
+
+        def make_norm():
+            if norm == "batchnorm1d" or norm == "batchnorm":
+                return nn.BatchNorm1d(hidden)
+            if norm == "layernorm" or norm == "ln":
+                return nn.LayerNorm(hidden)
+            return nn.Identity()
+
+        self.convs.append(TransformerConv(in_channels, hidden, heads=heads, concat=False))
+        self.norms.append(make_norm())
+        for _ in range(layers - 1):
+            self.convs.append(TransformerConv(hidden, hidden, heads=heads, concat=False))
+            self.norms.append(make_norm())
+
+        self.lin_out = nn.Linear(hidden, num_classes)
+        self.readout = (
+            nn.Sequential(
+                nn.Linear(hidden, hidden),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(hidden, num_classes),
+            )
+            if self.graph_head
+            else None
+        )
+
+    def forward(self, data):
+        x = data.x.float()
+        edge_index = data.edge_index
+        for conv, norm in zip(self.convs, self.norms):
+            x = conv(x, edge_index)
+            x = norm(x)
+            x = F.relu(x)
+            x = F.dropout(x, p=self.dropout, training=self.training)
+        if self.graph_head and hasattr(data, "batch") and self.readout is not None:
+            g = global_add_pool(x, data.batch)
+            return self.readout(g)
+        return self.lin_out(x)
+
+
+# ---------- TAGCN ----------
+class TAGCNNet(nn.Module):
+    def __init__(
+        self,
+        in_channels,
+        hidden,
+        num_classes,
+        K=3,
+        layers=2,
+        dropout=0.5,
+        norm: str = "None",
+        level: str = "node",
+    ):
+        super().__init__()
+        self.dropout = dropout
+        self.graph_head = level == "graph"
+
+        self.convs = nn.ModuleList()
+        self.norms = nn.ModuleList()
+
+        norm = (norm or "none").lower()
+
+        def make_norm():
+            if norm == "batchnorm1d" or norm == "batchnorm":
+                return nn.BatchNorm1d(hidden)
+            if norm == "layernorm" or norm == "ln":
+                return nn.LayerNorm(hidden)
+            return nn.Identity()
+
+        self.convs.append(TAGConv(in_channels, hidden, K=K))
+        self.norms.append(make_norm())
+        for _ in range(layers - 1):
+            self.convs.append(TAGConv(hidden, hidden, K=K))
+            self.norms.append(make_norm())
+
+        self.lin_out = nn.Linear(hidden, num_classes)
+        self.readout = (
+            nn.Sequential(
+                nn.Linear(hidden, hidden),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(hidden, num_classes),
+            )
+            if self.graph_head
+            else None
+        )
+
+    def forward(self, data):
+        x = data.x.float()
+        edge_index = data.edge_index
+        for conv, norm in zip(self.convs, self.norms):
+            x = conv(x, edge_index)
+            x = norm(x)
+            x = F.relu(x)
+            x = F.dropout(x, p=self.dropout, training=self.training)
+        if self.graph_head and hasattr(data, "batch") and self.readout is not None:
+            g = global_add_pool(x, data.batch)
+            return self.readout(g)
+        return self.lin_out(x)
+
+
+# ---------- GraphConv ----------
+class GraphConvNet(nn.Module):
+    def __init__(
+        self,
+        in_channels,
+        hidden,
+        num_classes,
+        layers=2,
+        dropout=0.5,
+        norm: str = "None",
+        level: str = "node",
+    ):
+        super().__init__()
+        self.dropout = dropout
+        self.graph_head = level == "graph"
+        self.convs = nn.ModuleList()
+        self.norms = nn.ModuleList()
+        norm = (norm or "none").lower()
+
+        def make_norm():
+            if norm == "batchnorm1d" or norm == "batchnorm":
+                return nn.BatchNorm1d(hidden)
+            if norm == "layernorm" or norm == "ln":
+                return nn.LayerNorm(hidden)
+            return nn.Identity()
+
+        self.convs.append(GraphConv(in_channels, hidden))
+        self.norms.append(make_norm())
+        for _ in range(layers - 1):
+            self.convs.append(GraphConv(hidden, hidden))
+            self.norms.append(make_norm())
+
+        self.lin_out = nn.Linear(hidden, num_classes)
+        self.readout = (
+            nn.Sequential(
+                nn.Linear(hidden, hidden),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(hidden, num_classes),
+            )
+            if self.graph_head
+            else None
+        )
+
+    def forward(self, data):
+        x = data.x.float()
+        edge_index = data.edge_index
+        for conv, norm in zip(self.convs, self.norms):
+            x = conv(x, edge_index)
+            x = norm(x)
+            x = F.relu(x)
+            x = F.dropout(x, p=self.dropout, training=self.training)
+        if self.graph_head and hasattr(data, "batch") and self.readout is not None:
+            g = global_add_pool(x, data.batch)
+            return self.readout(g)
+        return self.lin_out(x)
+
+
+# ---------- ChebNet ----------
+class ChebNet(nn.Module):
+    def __init__(
+        self,
+        in_channels,
+        hidden,
+        num_classes,
+        K=3,
+        layers=2,
+        dropout=0.5,
+        norm: str = "None",
+        level: str = "node",
+    ):
+        super().__init__()
+        self.dropout = dropout
+        self.graph_head = level == "graph"
+        self.convs = nn.ModuleList()
+        self.norms = nn.ModuleList()
+        norm = (norm or "none").lower()
+
+        def make_norm():
+            if norm == "batchnorm1d" or norm == "batchnorm":
+                return nn.BatchNorm1d(hidden)
+            if norm == "layernorm" or norm == "ln":
+                return nn.LayerNorm(hidden)
+            return nn.Identity()
+
+        self.convs.append(ChebConv(in_channels, hidden, K=K))
+        self.norms.append(make_norm())
+        for _ in range(layers - 1):
+            self.convs.append(ChebConv(hidden, hidden, K=K))
+            self.norms.append(make_norm())
+
+        self.lin_out = nn.Linear(hidden, num_classes)
+        self.readout = (
+            nn.Sequential(
+                nn.Linear(hidden, hidden),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(hidden, num_classes),
+            )
+            if self.graph_head
+            else None
+        )
+
+    def forward(self, data):
+        x = data.x.float()
+        edge_index = data.edge_index
+        for conv, norm in zip(self.convs, self.norms):
+            x = conv(x, edge_index)
+            x = norm(x)
+            x = F.relu(x)
+            x = F.dropout(x, p=self.dropout, training=self.training)
+        if self.graph_head and hasattr(data, "batch") and self.readout is not None:
+            g = global_add_pool(x, data.batch)
+            return self.readout(g)
+        return self.lin_out(x)
+
+
+# ---------- ARMA ----------
+class ARMAGNN(nn.Module):
+    def __init__(
+        self,
+        in_channels,
+        hidden,
+        num_classes,
+        layers=2,
+        dropout=0.5,
+        norm: str = "None",
+        level: str = "node",
+    ):
+        super().__init__()
+        self.dropout = dropout
+        self.graph_head = level == "graph"
+        self.convs = nn.ModuleList()
+        self.norms = nn.ModuleList()
+        norm = (norm or "none").lower()
+
+        def make_norm():
+            if norm == "batchnorm1d" or norm == "batchnorm":
+                return nn.BatchNorm1d(hidden)
+            if norm == "layernorm" or norm == "ln":
+                return nn.LayerNorm(hidden)
+            return nn.Identity()
+
+        self.convs.append(ARMAConv(in_channels, hidden, num_stacks=1, num_layers=1, shared_weights=False))
+        self.norms.append(make_norm())
+        for _ in range(layers - 1):
+            self.convs.append(ARMAConv(hidden, hidden, num_stacks=1, num_layers=1, shared_weights=False))
+            self.norms.append(make_norm())
+
+        self.lin_out = nn.Linear(hidden, num_classes)
+        self.readout = (
+            nn.Sequential(
+                nn.Linear(hidden, hidden),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(hidden, num_classes),
+            )
+            if self.graph_head
+            else None
+        )
+
+    def forward(self, data):
+        x = data.x.float()
+        edge_index = data.edge_index
+        for conv, norm in zip(self.convs, self.norms):
+            x = conv(x, edge_index)
+            x = norm(x)
+            x = F.relu(x)
+            x = F.dropout(x, p=self.dropout, training=self.training)
+        if self.graph_head and hasattr(data, "batch") and self.readout is not None:
+            g = global_add_pool(x, data.batch)
+            return self.readout(g)
+        return self.lin_out(x)
+
+
+# ---------- SGC ----------
+class SGCNet(nn.Module):
+    def __init__(
+        self,
+        in_channels,
+        hidden,
+        num_classes,
+        K=1,
+        layers=2,
+        dropout=0.5,
+        norm: str = "None",
+        level: str = "node",
+    ):
+        super().__init__()
+        self.dropout = dropout
+        self.graph_head = level == "graph"
+        self.convs = nn.ModuleList()
+        self.norms = nn.ModuleList()
+        norm = (norm or "none").lower()
+
+        def make_norm():
+            if norm == "batchnorm1d" or norm == "batchnorm":
+                return nn.BatchNorm1d(hidden)
+            if norm == "layernorm" or norm == "ln":
+                return nn.LayerNorm(hidden)
+            return nn.Identity()
+
+        self.convs.append(SGConv(in_channels, hidden, K=K, cached=True))
+        self.norms.append(make_norm())
+        for _ in range(layers - 1):
+            self.convs.append(SGConv(hidden, hidden, K=K, cached=True))
+            self.norms.append(make_norm())
+
+        self.lin_out = nn.Linear(hidden, num_classes)
+        self.readout = (
+            nn.Sequential(
+                nn.Linear(hidden, hidden),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(hidden, num_classes),
+            )
+            if self.graph_head
+            else None
+        )
+
+    def forward(self, data):
+        x = data.x.float()
+        edge_index = data.edge_index
+        for conv, norm in zip(self.convs, self.norms):
+            x = conv(x, edge_index)
+            x = norm(x)
+            x = F.relu(x)
+            x = F.dropout(x, p=self.dropout, training=self.training)
+        if self.graph_head and hasattr(data, "batch") and self.readout is not None:
+            g = global_add_pool(x, data.batch)
+            return self.readout(g)
+        return self.lin_out(x)
+
+
+# ---------- GIN ----------
+class GINNet(nn.Module):
+    def __init__(
+        self,
+        in_channels,
+        hidden,
+        num_classes,
+        layers=2,
+        dropout=0.5,
+        norm: str = "None",
+        level: str = "node",
+    ):
+        super().__init__()
+        self.dropout = dropout
+        self.graph_head = level == "graph"
+        self.convs = nn.ModuleList()
+        self.norms = nn.ModuleList()
+        norm = (norm or "none").lower()
+
+        def make_norm():
+            if norm == "batchnorm1d" or norm == "batchnorm":
+                return nn.BatchNorm1d(hidden)
+            if norm == "layernorm" or norm == "ln":
+                return nn.LayerNorm(hidden)
+            return nn.Identity()
+
+        mlp1 = nn.Sequential(nn.Linear(in_channels, hidden), nn.ReLU(), nn.Linear(hidden, hidden))
+        self.convs.append(GINConv(mlp1))
+        self.norms.append(make_norm())
+        for _ in range(layers - 1):
+            mlp = nn.Sequential(nn.Linear(hidden, hidden), nn.ReLU(), nn.Linear(hidden, hidden))
+            self.convs.append(GINConv(mlp))
+            self.norms.append(make_norm())
+
+        self.lin_out = nn.Linear(hidden, num_classes)
+        self.readout = (
+            nn.Sequential(
+                nn.Linear(hidden, hidden),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(hidden, num_classes),
+            )
+            if self.graph_head
+            else None
+        )
+
+    def forward(self, data):
+        x = data.x.float()
+        edge_index = data.edge_index
+        for conv, norm in zip(self.convs, self.norms):
+            x = conv(x, edge_index)
+            x = norm(x)
+            x = F.relu(x)
+            x = F.dropout(x, p=self.dropout, training=self.training)
+        if self.graph_head and hasattr(data, "batch") and self.readout is not None:
+            g = global_add_pool(x, data.batch)
+            return self.readout(g)
+        return self.lin_out(x)
+
+
+# ---------- APPNP ----------
+class APPNPGNN(nn.Module):
+    def __init__(
+        self,
+        in_channels,
+        hidden,
+        num_classes,
+        K=10,
+        alpha=0.1,
+        layers=2,
+        dropout=0.5,
+        norm: str = "None",
+        level: str = "node",
+    ):
+        super().__init__()
+        self.dropout = dropout
+        self.graph_head = level == "graph"
+        self.appnp = APPNP(K=K, alpha=alpha)
+
+        # simple MLP encoder with `layers` blocks
+        blocks = []
+        in_dim = in_channels
+        for _ in range(layers):
+            blocks += [nn.Linear(in_dim, hidden), nn.ReLU(), nn.Dropout(dropout)]
+            in_dim = hidden
+        self.encoder = nn.Sequential(*blocks)
+
+        self.lin_out = nn.Linear(hidden, num_classes)
+        self.readout = (
+            nn.Sequential(
+                nn.Linear(hidden, hidden),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(hidden, num_classes),
+            )
+            if self.graph_head
+            else None
+        )
+
+    def forward(self, data):
+        x = data.x.float()
+        edge_index = data.edge_index
+        x = self.encoder(x)
+        x = self.appnp(x, edge_index)
         if self.graph_head and hasattr(data, "batch") and self.readout is not None:
             g = global_add_pool(x, data.batch)
             return self.readout(g)
