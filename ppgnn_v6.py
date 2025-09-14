@@ -247,8 +247,9 @@ class LVConv(MessagePassing):
         self._custom_type = None
         if self.use_custom:
             if self.custom_gnn == "gcn":
-                self.custom_conv_R = GCNConv(self.d, self.d, add_self_loops=False, normalize=True, bias=False, cached=True)
-                self.custom_conv_F = GCNConv(self.d, self.d, add_self_loops=False, normalize=True, bias=False, cached=True)
+                # cached must be False for mini-batch graph classification
+                self.custom_conv_R = GCNConv(self.d, self.d, add_self_loops=False, normalize=True, bias=False, cached=False)
+                self.custom_conv_F = GCNConv(self.d, self.d, add_self_loops=False, normalize=True, bias=False, cached=False)
                 self._custom_type = "conv"
             elif self.custom_gnn == "sage":
                 self.custom_conv_R = SAGEConv(self.d, self.d, aggr="mean", root_weight=False, bias=False)
@@ -285,8 +286,9 @@ class LVConv(MessagePassing):
                 self.custom_conv_F = ARMAConv(self.d, self.d, num_stacks=1, num_layers=1, shared_weights=False)
                 self._custom_type = "conv"
             elif self.custom_gnn == "sgc":
-                self.custom_conv_R = SGConv(self.d, self.d, K=1, cached=True, bias=False)
-                self.custom_conv_F = SGConv(self.d, self.d, K=1, cached=True, bias=False)
+                # cached must be False for mini-batch graph classification
+                self.custom_conv_R = SGConv(self.d, self.d, K=1, cached=False, bias=False)
+                self.custom_conv_F = SGConv(self.d, self.d, K=1, cached=False, bias=False)
                 self._custom_type = "conv"
             elif self.custom_gnn == "gin":
                 mlpR = nn.Sequential(nn.Linear(self.d, self.d), nn.ReLU(), nn.Linear(self.d, self.d))
@@ -982,7 +984,7 @@ def load_yaml_config(dataset: str, cfg_dir: str = "configs") -> Dict[str, Any]:
 
 def main(argv: Iterable[str] | None = None):
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset", nargs="+", default=["MNIST"], help="Datasets")
+    parser.add_argument("--dataset", nargs="+", default=["Cora"], help="Datasets")
     parser.add_argument("--models", nargs="+", default=["ppgnn"], help="Models to train")
     parser.add_argument("--hidden", type=int, default=None)
     parser.add_argument("--layers", type=int, default=None)
