@@ -28,7 +28,7 @@ ppgnn:
     fa_dx1: 1.0
     fa_dy1: 1.0
   train:
-    epochs: 800
+    epochs: 2
     lr: 0.001
     weight_decay: 0.0005
     clip_value: 5.0
