@@ -2,13 +2,12 @@ from __future__ import annotations
 
 """
 ppgnn_v6.py; 这个版本也不错，我把# FA-LV（更强的异质驱动，放大 F 的平滑幅度与耦合）的参数都设置为了1，也就是全部可学习了。
-重要，在ppgnn_v6.py版本中，使用custom_gnn="gcn"时，会自动调用PyG的GCNConv作为扩散算子，且使用了通道耦合矩阵W！！！！这个和我们公式不一致了！！！！
-而直接通过norm_type: "sym"，这个才是我们论文中的扩散算子。即B = D−1/2AD−1/2；而 norm_type: "rw" 则是随机游走归一化的扩散算子B = D−1A。
+重要：扩散算子完全由 norm_type 控制；norm_type: "sym" 对应论文中的 B = D−1/2AD−1/2，norm_type: "rw" 对应随机游走归一化 B = D−1A。
 -----------
 Single-file runner for PPGNN and baselines (V6).
 
 Key points vs earlier versions:
-- Keep "custom" / "custom_gnn" so Jacobi can use a PyG operator as diffusion skeleton.
+- Diffusion backbone is fixed to normalized adjacency chosen via norm_type ("sym" or "rw"); no learnable PyG conv inside Jacobi.
 - Implement FA-LV (Frequency-Adaptive LV): alpha,beta,gamma,delta, Dx,Dy become functions of graph heterophily rho.
 - Remove explicit HF gating by default; let LV+two-scale diffusion realize low/band/high-pass automatically.
 - Robust YAML loading: reads {dataset}.yaml from --config-dir (no version suffix).
@@ -50,16 +49,9 @@ from torch_geometric.transforms import (
 )
 from torch_geometric.utils import degree
 from torch_geometric.nn import (
-    APPNP,
-    ARMAConv,
-    ChebConv,
     GATConv,
     GCNConv,
-    GINConv,
-    GraphConv,
     SAGEConv,
-    SGConv,
-    TAGConv,
     TransformerConv,
 )
 from torch_geometric.nn.conv import MessagePassing
@@ -169,7 +161,7 @@ class LVConv(MessagePassing):
     Lotka–Volterra graph convolution layer with semi-implicit diffusion.
     - Two channels: R,F (each d dims); reaction coeffs alpha,beta,gamma,delta (per-channel);
       diffusion strengths Dx,Dy (scalars, positive).
-    - Jacobi step inside the layer; optionally replace S·X by a PyG conv ("custom"/"custom_gnn").
+    - Jacobi step inside the layer using normalized adjacency S (sym or rw).
     - FA-LV: alpha,beta,gamma,delta,Dx,Dy depend on graph heterophily rho in [0,1].
       Mapping (softplus keeps positivity):
         alpha(rho) = softplus(alpha + alpha1 * rho)
@@ -191,10 +183,6 @@ class LVConv(MessagePassing):
         beta0: float = 0.1,
         dx0: float = 0.7,
         dy0: float = 0.8,
-        # Scheme A: use PyG convs as diffusion operator
-        custom: int | bool = 1,
-        custom_gnn: str = "gcn",
-        heads: int = 1,
         # FA-LV toggles
         fa_lv: int | bool = 1,
         fa_power: float = 1.0,
@@ -242,65 +230,6 @@ class LVConv(MessagePassing):
         self.dx1    = nn.Parameter(torch.tensor(float(fa_dx1)))
         self.dy1    = nn.Parameter(torch.tensor(float(fa_dy1)))
 
-        # Custom convs (Scheme A) for both R and F paths
-        self.use_custom = bool(custom)
-        self.custom_gnn = (custom_gnn or "gcn").lower()
-        self.heads = int(heads)
-        self._custom_type = None
-        if self.use_custom:
-            if self.custom_gnn == "gcn":
-                # cached must be False for mini-batch graph classification
-                self.custom_conv_R = GCNConv(self.d, self.d, add_self_loops=False, normalize=True, bias=False, cached=False)
-                self.custom_conv_F = GCNConv(self.d, self.d, add_self_loops=False, normalize=True, bias=False, cached=False)
-                self._custom_type = "conv"
-            elif self.custom_gnn == "sage":
-                self.custom_conv_R = SAGEConv(self.d, self.d, aggr="mean", root_weight=False, bias=False)
-                self.custom_conv_F = SAGEConv(self.d, self.d, aggr="mean", root_weight=False, bias=False)
-                self._custom_type = "conv"
-            elif self.custom_gnn == "gat":
-                self.custom_conv_R = GATConv(self.d, self.d, heads=self.heads, concat=False, add_self_loops=False, bias=False)
-                self.custom_conv_F = GATConv(self.d, self.d, heads=self.heads, concat=False, add_self_loops=False, bias=False)
-                self._custom_type = "conv"
-            elif self.custom_gnn == "transformer":
-                self.custom_conv_R = TransformerConv(self.d, self.d, heads=self.heads, concat=False, add_self_loops=False, bias=False)
-                self.custom_conv_F = TransformerConv(self.d, self.d, heads=self.heads, concat=False, add_self_loops=False, bias=False)
-                self._custom_type = "conv"
-            elif self.custom_gnn == "appnp":
-                self.lin_R = nn.Linear(self.d, self.d, bias=False)
-                self.lin_F = nn.Linear(self.d, self.d, bias=False)
-                self.appnp_R = APPNP(K=10, alpha=0.1, dropout=0.0)
-                self.appnp_F = APPNP(K=10, alpha=0.1, dropout=0.0)
-                self._custom_type = "appnp"
-            elif self.custom_gnn == "tagcn":
-                self.custom_conv_R = TAGConv(self.d, self.d, K=3, bias=False)
-                self.custom_conv_F = TAGConv(self.d, self.d, K=3, bias=False)
-                self._custom_type = "conv"
-            elif self.custom_gnn == "graphconv":
-                self.custom_conv_R = GraphConv(self.d, self.d, aggr="add", bias=False)
-                self.custom_conv_F = GraphConv(self.d, self.d, aggr="add", bias=False)
-                self._custom_type = "conv"
-            elif self.custom_gnn == "cheb":
-                self.custom_conv_R = ChebConv(self.d, self.d, K=3)
-                self.custom_conv_F = ChebConv(self.d, self.d, K=3)
-                self._custom_type = "conv"
-            elif self.custom_gnn == "arma":
-                self.custom_conv_R = ARMAConv(self.d, self.d, num_stacks=1, num_layers=1, shared_weights=False)
-                self.custom_conv_F = ARMAConv(self.d, self.d, num_stacks=1, num_layers=1, shared_weights=False)
-                self._custom_type = "conv"
-            elif self.custom_gnn == "sgc":
-                # cached must be False for mini-batch graph classification
-                self.custom_conv_R = SGConv(self.d, self.d, K=1, cached=False, bias=False)
-                self.custom_conv_F = SGConv(self.d, self.d, K=1, cached=False, bias=False)
-                self._custom_type = "conv"
-            elif self.custom_gnn == "gin":
-                mlpR = nn.Sequential(nn.Linear(self.d, self.d), nn.ReLU(), nn.Linear(self.d, self.d))
-                mlpF = nn.Sequential(nn.Linear(self.d, self.d), nn.ReLU(), nn.Linear(self.d, self.d))
-                self.custom_conv_R = GINConv(mlpR)
-                self.custom_conv_F = GINConv(mlpF)
-                self._custom_type = "conv"
-            else:
-                raise ValueError(f"Unknown custom_gnn: {self.custom_gnn}")
-
     def _fa_rho(self, hetero: float | None) -> float:
         rho = 0.5 if hetero is None else float(max(0.0, min(1.0, hetero)))
         if self.fa_power != 1.0:
@@ -329,33 +258,19 @@ class LVConv(MessagePassing):
         Dy = F.softplus(Dy) + self.eps
         return a, b, g, d, Dx, Dy
 
-    def _apply_conv(self, ZR: torch.Tensor, ZF: torch.Tensor, edge_index: torch.Tensor):
-        if not self.use_custom:
-            return None, None
-        if self._custom_type == "appnp":
-            SR = self.appnp_R(self.lin_R(ZR), edge_index)
-            SF = self.appnp_F(self.lin_F(ZF), edge_index)
-            return SR, SF
-        SR = self.custom_conv_R(ZR, edge_index)
-        SF = self.custom_conv_F(ZF, edge_index)
-        return SR, SF
-
     def forward(self, h: torch.Tensor, edge_index: torch.Tensor, hetero: float | None = None):
         X, Y = torch.split(h, self.d, dim=-1)  # X->R, Y->F
 
-        # Norm weights for non-custom path
-        if not self.use_custom:
-            N = h.size(0)
-            row, col = edge_index
-            if self.norm_type == "sym":
-                deg = degree(row, N, dtype=X.dtype).clamp(min=1)
-                deg_inv_sqrt = deg.pow(-0.5)
-                norm = deg_inv_sqrt[row] * deg_inv_sqrt[col]
-            else:
-                deg = degree(col, N, dtype=X.dtype).clamp(min=1)
-                norm = (1.0 / deg)[col]
+        # Norm weights from normalized adjacency (sym or rw)
+        N = h.size(0)
+        row, col = edge_index
+        if self.norm_type == "sym":
+            deg = degree(row, N, dtype=X.dtype).clamp(min=1)
+            deg_inv_sqrt = deg.pow(-0.5)
+            norm = deg_inv_sqrt[row] * deg_inv_sqrt[col]
         else:
-            norm = None  # unused
+            deg = degree(col, N, dtype=X.dtype).clamp(min=1)
+            norm = (1.0 / deg)[col]
 
         # Effective parameters (FA-LV)
         a, b, g, d, Dx, Dy = self._eff_params(hetero)
@@ -375,18 +290,15 @@ class LVConv(MessagePassing):
         # Jacobi iterations
         Xk, Yk = X, Y
         for _ in range(self.jacobi_steps):
-            if self.use_custom:
-                SXk, SYk = self._apply_conv(Xk, Yk, edge_index)
-            else:
-                SXk = self.propagate(edge_index, x=Xk, norm=norm)
-                SYk = self.propagate(edge_index, x=Yk, norm=norm)
+            SXk = self.propagate(edge_index, x=Xk, norm=norm)
+            SYk = self.propagate(edge_index, x=Yk, norm=norm)
             Xk = (RHS_X + ax * SXk) / denom_x
             Yk = (RHS_Y + ay * SYk) / denom_y
 
         return torch.cat([Xk, Yk], dim=-1)
 
     def message(self, x_j: torch.Tensor, norm: torch.Tensor):
-        # only used when not custom
+        # Scale neighbor features by normalized edge weights
         return norm.view(-1, 1) * x_j
 
 
@@ -416,10 +328,6 @@ class PPGNN(nn.Module):
         level: str = "node",
         lift_type: str = "linear",
         lift_layers: int = 2,
-        # Scheme A
-        custom: int | bool = 0,
-        custom_gnn: str = "gcn",
-        heads: int = 1,
         # FA-LV
         fa_lv: int | bool = 1,
         fa_power: float = 1.0,
@@ -464,9 +372,6 @@ class PPGNN(nn.Module):
                     beta0=beta0,
                     dx0=dx0,
                     dy0=dy0,
-                    custom=custom,
-                    custom_gnn=custom_gnn,
-                    heads=heads,
                     fa_lv=fa_lv,
                     fa_power=fa_power,
                     fa_alpha1=fa_alpha1,
@@ -928,6 +833,8 @@ TRAIN_DEFAULTS = {"lr": 0.002, "weight_decay": 0.0005, "epochs": 600, "clip_valu
 
 def get_model(name: str, in_channels: int, out_channels: int, cfg: Dict[str, Any], level: str):
     cfg = cfg or {}
+    if name == "ppgnn":
+        cfg = {k: v for k, v in cfg.items() if k not in {"custom", "custom_gnn", "heads"}}
     params = dict(in_channels=in_channels, hidden=cfg.get("hidden", 128), num_classes=out_channels, level=level)
     if name == "ppgnn":
         return PPGNN(
@@ -946,9 +853,6 @@ def get_model(name: str, in_channels: int, out_channels: int, cfg: Dict[str, Any
             norm=cfg.get("norm", "BatchNorm1d"),
             lift_type=cfg.get("lift_type", "linear"),
             lift_layers=cfg.get("lift_layers", 2),
-            custom=cfg.get("custom", 0),
-            custom_gnn=cfg.get("custom_gnn", "gcn"),
-            heads=cfg.get("heads", 1),
             fa_lv=cfg.get("fa_lv", 1),
             fa_power=cfg.get("fa_power", 1.0),
             fa_alpha1=cfg.get("fa_alpha1", 0.10),
@@ -995,11 +899,6 @@ def main(argv: Iterable[str] | None = None):
     parser.add_argument("--weight_decay", type=float, default=None)
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--config-dir", type=str, default="configs")
-    # scheme A toggles
-    parser.add_argument("--custom", type=int, default=None)
-    parser.add_argument("--custom-gnn", type=str, default=None,
-                        choices=["gcn","sage","gat","transformer","tagcn","graphconv","cheb","arma","sgc","gin","appnp"])
-    parser.add_argument("--heads", type=int, default=None)
     parser.add_argument("--clip_value", type=float, default=None)
     args = parser.parse_args(argv)
 
@@ -1021,11 +920,9 @@ def main(argv: Iterable[str] | None = None):
                 else:
                     model_params.setdefault(key, default)
 
-            # override PPGNN scheme A from CLI if provided
             if model_name == "ppgnn":
-                if args.custom is not None: model_params["custom"] = int(args.custom)
-                if args.custom_gnn is not None: model_params["custom_gnn"] = args.custom_gnn
-                if args.heads is not None: model_params["heads"] = int(args.heads)
+                for k in ("custom", "custom_gnn", "heads"):
+                    model_params.pop(k, None)
             model_cfg["model"] = model_params
 
             train_cfg = model_cfg.get("train", {})
