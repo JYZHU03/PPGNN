@@ -27,6 +27,7 @@ ppgnn:
     fa_delta1: 1
     fa_dx1: 1
     fa_dy1: 1
+    tag_k: 3
   train:
     epochs: 600
     lr: 0.002

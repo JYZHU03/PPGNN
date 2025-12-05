@@ -2,12 +2,12 @@ from __future__ import annotations
 
 """
 ppgnn_v6.py; 这个版本也不错，我把# FA-LV（更强的异质驱动，放大 F 的平滑幅度与耦合）的参数都设置为了1，也就是全部可学习了。
-重要：扩散算子完全由 norm_type 控制；norm_type: "sym" 对应论文中的 B = D−1/2AD−1/2，norm_type: "rw" 对应随机游走归一化 B = D−1A。
+重要：扩散算子完全由 norm_type 控制；norm_type: "sym" 对应论文中的 B = D−1/2AD−1/2，norm_type: "rw" 对应随机游走归一化 B = D−1A；此外支持 tag\* 形式的多项式核（不含通道混合）。
 -----------
 Single-file runner for PPGNN and baselines (V6).
 
 Key points vs earlier versions:
-- Diffusion backbone is fixed to normalized adjacency chosen via norm_type ("sym" or "rw"); no learnable PyG conv inside Jacobi.
+- Diffusion backbone is fixed to normalized adjacency chosen via norm_type ("sym"/"rw"/tag variants); no learnable PyG conv inside Jacobi.
 - Implement FA-LV (Frequency-Adaptive LV): alpha,beta,gamma,delta, Dx,Dy become functions of graph heterophily rho.
 - Remove explicit HF gating by default; let LV+two-scale diffusion realize low/band/high-pass automatically.
 - Robust YAML loading: reads {dataset}.yaml from --config-dir (no version suffix).
@@ -161,7 +161,8 @@ class LVConv(MessagePassing):
     Lotka–Volterra graph convolution layer with semi-implicit diffusion.
     - Two channels: R,F (each d dims); reaction coeffs alpha,beta,gamma,delta (per-channel);
       diffusion strengths Dx,Dy (scalars, positive).
-    - Jacobi step inside the layer using normalized adjacency S (sym or rw).
+    - Diffusion kernel S is fixed, feature-independent: sym/rw normalized adjacency, or a TAG-like
+      polynomial over S (norm_type in {"sym","rw","tag","tag_sym","tag_rw"}).
     - FA-LV: alpha,beta,gamma,delta,Dx,Dy depend on graph heterophily rho in [0,1].
       Mapping (softplus keeps positivity):
         alpha(rho) = softplus(alpha + alpha1 * rho)
@@ -183,6 +184,7 @@ class LVConv(MessagePassing):
         beta0: float = 0.1,
         dx0: float = 0.7,
         dy0: float = 0.8,
+        tag_k: int = 3,
         # FA-LV toggles
         fa_lv: int | bool = 1,
         fa_power: float = 1.0,
@@ -194,13 +196,23 @@ class LVConv(MessagePassing):
         fa_dy1: float = 0.60,
     ):
         super().__init__(aggr="add")
-        assert norm_type in {"sym", "rw"}
+        allowed_norm = {"sym", "rw", "tag", "tag_sym", "tag_rw"}
+        if norm_type not in allowed_norm:
+            raise ValueError(f"norm_type must be one of {allowed_norm}, got {norm_type}")
         assert jacobi_steps >= 1
         self.d = int(channels)
         self.dt = float(dt)
         self.norm_type = norm_type
         self.jacobi_steps = int(jacobi_steps)
         self.eps = float(eps)
+        self.tag_k = int(tag_k)
+        if self.norm_type.startswith("tag"):
+            if self.tag_k < 0:
+                raise ValueError("tag_k must be non-negative")
+            # Shared scalar coefficients for polynomial S(X) = sum c_k S^k X
+            self.tag_coeff = nn.Parameter(torch.ones(self.tag_k + 1))
+        else:
+            self.tag_coeff = None
 
         # Reaction parameters (pre-softplus, per-channel)
         self.alpha = nn.Parameter(torch.zeros(self.d))
@@ -236,6 +248,26 @@ class LVConv(MessagePassing):
             rho = float(rho ** self.fa_power)
         return rho
 
+    def _base_norm_type(self) -> str:
+        if self.norm_type in {"sym", "tag", "tag_sym"}:
+            return "sym"
+        if self.norm_type in {"rw", "tag_rw"}:
+            return "rw"
+        raise ValueError(f"Unexpected norm_type: {self.norm_type}")
+
+    def _apply_kernel(self, Z: torch.Tensor, edge_index: torch.Tensor, norm: torch.Tensor) -> torch.Tensor:
+        # Base normalized adjacency (one-hop)
+        if not self.norm_type.startswith("tag"):
+            return self.propagate(edge_index, x=Z, norm=norm)
+        # TAG-like polynomial S(X) = sum_{k=0}^K c_k S^k X with shared scalar coeffs
+        outs = [Z]
+        cur = Z
+        for _ in range(self.tag_k):
+            cur = self.propagate(edge_index, x=cur, norm=norm)
+            outs.append(cur)
+        assert self.tag_coeff is not None
+        return sum(c * o for c, o in zip(self.tag_coeff, outs))
+
     def _eff_params(self, hetero: float | None):
         """Return effective positive params with FA-LV mapping."""
         # base pre-softplus params
@@ -264,7 +296,8 @@ class LVConv(MessagePassing):
         # Norm weights from normalized adjacency (sym or rw)
         N = h.size(0)
         row, col = edge_index
-        if self.norm_type == "sym":
+        base_norm = self._base_norm_type()
+        if base_norm == "sym":
             deg = degree(row, N, dtype=X.dtype).clamp(min=1)
             deg_inv_sqrt = deg.pow(-0.5)
             norm = deg_inv_sqrt[row] * deg_inv_sqrt[col]
@@ -290,8 +323,8 @@ class LVConv(MessagePassing):
         # Jacobi iterations
         Xk, Yk = X, Y
         for _ in range(self.jacobi_steps):
-            SXk = self.propagate(edge_index, x=Xk, norm=norm)
-            SYk = self.propagate(edge_index, x=Yk, norm=norm)
+            SXk = self._apply_kernel(Xk, edge_index, norm)
+            SYk = self._apply_kernel(Yk, edge_index, norm)
             Xk = (RHS_X + ax * SXk) / denom_x
             Yk = (RHS_Y + ay * SYk) / denom_y
 
@@ -324,6 +357,7 @@ class PPGNN(nn.Module):
         beta0: float = 0.1,
         dx0: float = 0.7,
         dy0: float = 0.8,
+        tag_k: int = 0,
         norm: str = "BatchNorm1d",
         level: str = "node",
         lift_type: str = "linear",
@@ -372,6 +406,7 @@ class PPGNN(nn.Module):
                     beta0=beta0,
                     dx0=dx0,
                     dy0=dy0,
+                    tag_k=tag_k,
                     fa_lv=fa_lv,
                     fa_power=fa_power,
                     fa_alpha1=fa_alpha1,
@@ -850,6 +885,7 @@ def get_model(name: str, in_channels: int, out_channels: int, cfg: Dict[str, Any
             beta0=cfg.get("beta0", 0.1),
             dx0=cfg.get("dx0", 0.7),
             dy0=cfg.get("dy0", 0.8),
+            tag_k=cfg.get("tag_k", 0),
             norm=cfg.get("norm", "BatchNorm1d"),
             lift_type=cfg.get("lift_type", "linear"),
             lift_layers=cfg.get("lift_layers", 2),
