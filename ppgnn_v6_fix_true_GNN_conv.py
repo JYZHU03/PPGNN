@@ -359,6 +359,7 @@ class PPGNN(nn.Module):
         dy0: float = 0.8,
         tag_k: int = 0,
         norm: str = "BatchNorm1d",
+        act: str = "identity",
         level: str = "node",
         lift_type: str = "linear",
         lift_layers: int = 2,
@@ -379,6 +380,7 @@ class PPGNN(nn.Module):
         self.y0_mode = y0_mode
         self.graph_head = (level == "graph")
         self._hetero_cached: Optional[float] = None  # rho cache
+        self.act = self._make_activation(act)
 
         # Lift
         lt = (lift_type or "linear").lower()
@@ -455,6 +457,19 @@ class PPGNN(nn.Module):
                 self._hetero_cached = float(max(0.0, min(1.0, 1.0 - hom01)))  # rho in [0,1]
         return self._hetero_cached
 
+    @staticmethod
+    def _make_activation(name: str) -> nn.Module:
+        n = (name or "identity").lower()
+        if n in {"tanh"}:
+            return nn.Tanh()
+        if n in {"relu"}:
+            return nn.ReLU()
+        if n in {"gelu"}:
+            return nn.GELU()
+        if n in {"identity", "none"}:
+            return nn.Identity()
+        raise ValueError(f"Unknown activation: {name}")
+
     def forward(self, data):
         rho = self._lazy_rho(data)  # hetero
 
@@ -468,6 +483,7 @@ class PPGNN(nn.Module):
         for conv, tau_p, norm in zip(self.layers, self.taus, self.norms):
             h = F.dropout(h, p=self.dropout, training=self.training)
             h_hat = conv(h, data.edge_index, hetero=rho)
+            h_hat = self.act(h_hat)
             tau = torch.sigmoid(tau_p)
             h = (1 - tau) * h + tau * h_hat
             h = norm(h)
@@ -887,6 +903,7 @@ def get_model(name: str, in_channels: int, out_channels: int, cfg: Dict[str, Any
             dy0=cfg.get("dy0", 0.8),
             tag_k=cfg.get("tag_k", 0),
             norm=cfg.get("norm", "BatchNorm1d"),
+            act=cfg.get("act", "tanh"),
             lift_type=cfg.get("lift_type", "linear"),
             lift_layers=cfg.get("lift_layers", 2),
             fa_lv=cfg.get("fa_lv", 1),
@@ -926,7 +943,7 @@ def load_yaml_config(dataset: str, cfg_dir: str = "configs") -> Dict[str, Any]:
 
 def main(argv: Iterable[str] | None = None):
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset", nargs="+", default=["Cora"], help="Datasets")
+    parser.add_argument("--dataset", nargs="+", default=["Cornell"], help="Datasets")
     parser.add_argument("--models", nargs="+", default=["ppgnn"], help="Models to train")
     parser.add_argument("--hidden", type=int, default=None)
     parser.add_argument("--layers", type=int, default=None)
