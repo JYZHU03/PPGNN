@@ -163,6 +163,7 @@ class LVConv(MessagePassing):
       diffusion strengths Dx,Dy (scalars, positive).
     - Diffusion kernel S is fixed, feature-independent: sym/rw normalized adjacency, or a TAG-like
       polynomial over S (norm_type in {"sym","rw","tag","tag_sym","tag_rw"}).
+    - Discretization selectable: semi-implicit Euler + Jacobi (imex) or explicit Euler.
     - FA-LV: alpha,beta,gamma,delta,Dx,Dy depend on graph heterophily rho in [0,1].
       Mapping (softplus keeps positivity):
         alpha(rho) = softplus(alpha + alpha1 * rho)
@@ -179,6 +180,7 @@ class LVConv(MessagePassing):
         dt: float = 0.1,
         norm_type: str = "sym",
         jacobi_steps: int = 2,
+        solver: str = "explicit", #"imex" or "explicit"
         eps: float = 1e-3,
         alpha0: float = 0.2,
         beta0: float = 0.1,
@@ -199,11 +201,15 @@ class LVConv(MessagePassing):
         allowed_norm = {"sym", "rw", "tag", "tag_sym", "tag_rw"}
         if norm_type not in allowed_norm:
             raise ValueError(f"norm_type must be one of {allowed_norm}, got {norm_type}")
+        solver = (solver or "imex").lower()
+        if solver not in {"imex", "explicit"}:
+            raise ValueError(f"solver must be 'imex' or 'explicit', got {solver}")
         assert jacobi_steps >= 1
         self.d = int(channels)
         self.dt = float(dt)
         self.norm_type = norm_type
         self.jacobi_steps = int(jacobi_steps)
+        self.solver = solver
         self.eps = float(eps)
         self.tag_k = int(tag_k)
         if self.norm_type.startswith("tag"):
@@ -312,15 +318,21 @@ class LVConv(MessagePassing):
         # Reaction terms
         RX = a * X - b * (X * Y)
         RY = d * (X * Y) - g * Y
-        RHS_X = X + dt * RX
-        RHS_Y = Y + dt * RY
-
         ax = dt * Dx
         ay = dt * Dy
+
+        if self.solver == "explicit":
+            SX = self._apply_kernel(X, edge_index, norm)
+            SY = self._apply_kernel(Y, edge_index, norm)
+            X_out = X + dt * (RX + Dx * (SX - X))
+            Y_out = Y + dt * (RY + Dy * (SY - Y))
+            return torch.cat([X_out, Y_out], dim=-1)
+
+        # semi-implicit (IMEX) with Jacobi inner steps
+        RHS_X = X + dt * RX
+        RHS_Y = Y + dt * RY
         denom_x = 1.0 + ax
         denom_y = 1.0 + ay
-
-        # Jacobi iterations
         Xk, Yk = X, Y
         for _ in range(self.jacobi_steps):
             SXk = self._apply_kernel(Xk, edge_index, norm)
@@ -351,6 +363,7 @@ class PPGNN(nn.Module):
         dropout: float = 0.4,
         norm_type: str = "sym",
         jacobi_steps: int = 2,
+        solver: str = "imex",
         use_x_only: bool = False,
         y0_mode: str = "learned",
         alpha0: float = 0.2,
@@ -404,6 +417,7 @@ class PPGNN(nn.Module):
                     dt=dt,
                     norm_type=norm_type,
                     jacobi_steps=jacobi_steps,
+                    solver=solver,
                     alpha0=alpha0,
                     beta0=beta0,
                     dx0=dx0,
@@ -895,6 +909,7 @@ def get_model(name: str, in_channels: int, out_channels: int, cfg: Dict[str, Any
             dropout=cfg.get("dropout", 0.4),
             norm_type=cfg.get("norm_type", "sym"),
             jacobi_steps=cfg.get("jacobi_steps", 2),
+            solver=cfg.get("solver", "imex"),
             use_x_only=cfg.get("use_x_only", False),
             y0_mode=cfg.get("y0_mode", "learned"),
             alpha0=cfg.get("alpha0", 0.2),
@@ -943,7 +958,7 @@ def load_yaml_config(dataset: str, cfg_dir: str = "configs") -> Dict[str, Any]:
 
 def main(argv: Iterable[str] | None = None):
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset", nargs="+", default=["Cornell"], help="Datasets")
+    parser.add_argument("--dataset", nargs="+", default=["Cora"], help="Datasets")
     parser.add_argument("--models", nargs="+", default=["ppgnn"], help="Models to train")
     parser.add_argument("--hidden", type=int, default=None)
     parser.add_argument("--layers", type=int, default=None)
@@ -952,6 +967,7 @@ def main(argv: Iterable[str] | None = None):
     parser.add_argument("--weight_decay", type=float, default=None)
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--config-dir", type=str, default="configs")
+    parser.add_argument("--solver", type=str, default=None, choices=["imex", "explicit"])
     parser.add_argument("--clip_value", type=float, default=None)
     args = parser.parse_args(argv)
 
@@ -976,6 +992,8 @@ def main(argv: Iterable[str] | None = None):
             if model_name == "ppgnn":
                 for k in ("custom", "custom_gnn", "heads"):
                     model_params.pop(k, None)
+                if args.solver is not None:
+                    model_params["solver"] = args.solver
             model_cfg["model"] = model_params
 
             train_cfg = model_cfg.get("train", {})
