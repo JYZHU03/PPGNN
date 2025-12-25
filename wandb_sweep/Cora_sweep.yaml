@@ -1,0 +1,17 @@
+program: ppgnn_v6_clean_wandb.py
+method: bayes
+metric:
+  name: val_acc
+  goal: maximize
+
+parameters:
+  dataset: {value: Cora}
+  config: {value: configs/Cora_v6_clean.yaml}
+
+  dt:  {distribution: log_uniform_values, min: 0.08, max: 0.12}
+  dropout: {distribution: uniform, min: 0.38, max: 0.43}
+  lr: {distribution: log_uniform_values, min: 5e-6, max: 0.01}
+  weight_decay: {distribution: log_uniform_values, min: 1e-6, max: 0.01}
+  clip_value: {distribution: uniform, min: 1.0, max: 10.0}
+
+run_cap: 50
