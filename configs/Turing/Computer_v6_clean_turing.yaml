@@ -1,0 +1,42 @@
+ppgnn:
+  model:
+    hidden: 128
+    layers: 10
+    dt: 0.00942663635810312
+    dropout: 0.02
+    norm_type: "rw"
+    jacobi_steps: 2
+    use_x_only: false
+    y0_mode: "learned"
+    alpha0: 0.2
+    beta0: 0.1
+    dx0: 0.7
+    dy0: 0.8
+    norm: "BatchNorm1d"  # options: BatchNorm1d | LayerNorm | none
+    lift_type: "linear"  # options: linear | mlp
+    lift_layers: 2       # used when lift_type=mlp
+    # act choices: identity | relu | tanh | gelu | sigmoid | softplus | leaky_relu
+    act: "identity"      # activation after each LVConv
+    act_x0: "tanh"       # activation for lift_x
+    act_y0: "tanh"       # activation for lift_y
+    norm_type: "sym"     # options: sym | rw | tag | tag_sym | tag_rw
+    y0_mode: "learned"   # options: learned | ones
+    tag_k: 3
+    solver: "imex"       # options: imex | explicit
+    learn_dt: 1
+    a0: 0.7
+    b0: -1.8
+    c0: 2.2
+    s0: 2.0
+    du0: 0.37
+    dv0: 17.4
+    mu_a: 0.0
+    mu_b: 1.5
+    turing_margin: 1e-3
+    turing_mu_out: 2.0
+  train:
+    epochs: 600
+    lr: 0.030592562674754253
+    weight_decay: 1.0551223363740957e-06
+    clip_value: 9.53270521729751
+    turing_reg_weight: 1e-3
